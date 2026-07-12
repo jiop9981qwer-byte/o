@@ -114,7 +114,7 @@ local function TriggerSmartKill()
     task.spawn(function()
         task.wait(5.01)
         KillAll()
-        task.wait(2.9)
+        task.wait(2.5)
         KillAll()
     end)
 end
@@ -146,7 +146,7 @@ CombatTab:CreateButton({
     Callback = function() KillAll() end,
 })
 CombatTab:CreateToggle({
-    Name = "Auto Kill (6s + 3s)",
+    Name = "Auto Kill",
     CurrentValue = false,
     Flag = "AutoKill",
     Callback = function(Value) _G.AutoKill = Value end,
