@@ -112,9 +112,9 @@ local function TriggerSmartKill()
     _G.InRematchLoop = false
     if not _G.AutoKill then return end
     task.spawn(function()
-        task.wait(6)
+        task.wait(5.01)
         KillAll()
-        task.wait(3)
+        task.wait(2.9)
         KillAll()
     end)
 end
