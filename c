@@ -108,14 +108,38 @@ local function KillAll()
     end
 end
 
+-- [[ UPDATED SMART KILL LOGIC ]]
+local killCoroutine = nil
 local function TriggerSmartKill()
     _G.InRematchLoop = false
     if not _G.AutoKill then return end
-    task.spawn(function()
-        task.wait(5.01)
-        KillAll()
-        task.wait(2.5)
-        KillAll()
+    
+    -- 기존에 실행 중인 킬 루틴이 있다면 취소하여 중복 방지
+    if killCoroutine then
+        task.cancel(killCoroutine)
+        killCoroutine = nil
+    end
+    
+    killCoroutine = task.spawn(function()
+        -- 1. 라운드클린업 이후 5초 대기
+        task.wait(5)
+        
+        -- 2. 2초간 초당 10회(10/s) 발사 (총 20회)
+        for i = 1, 20 do
+            if not _G.AutoKill then break end
+            KillAll()
+            task.wait(0.1)
+        end
+        
+        -- 3. 1초간 정지
+        task.wait(1)
+        
+        -- 4. 다시 2초간 초당 10회(10/s) 발사 (총 20회)
+        for i = 1, 20 do
+            if not _G.AutoKill then break end
+            KillAll()
+            task.wait(0.1)
+        end
     end)
 end
 
@@ -337,5 +361,5 @@ end)
 
 Rayfield:Notify({
     Title = "Koji HUD",
-    Content = "5-10s Rematch & Win Limit Queue Fixed!"
+    Content = "Burst Kill Logic (10/s) Updated!"
 })
