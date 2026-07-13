@@ -115,39 +115,24 @@ local function KillAll()
     end
 end
 
-local function runBurstKill()
-    for i = 1, 3 do
-        if not _G.AutoKill then break end
-        KillAll()
-        task.wait(0.33)
-    end
-end
-
 local function OnRoundCleanup()
-    if not _G.AutoQueue then return end
+    if not _G.AutoQueue and not _G.AutoDuelChallenge then return end
     task.spawn(function()
         _G.InCleanupWait = true
-        task.wait(50) -- 50초 대기 로직 적용
+        task.wait(38) -- 38초 대기
         _G.InCleanupWait = false
     end)
 end
 
-local killCoroutine = nil
 local function TriggerSmartKill()
     _G.InRematchLoop = false
     OnRoundCleanup()
     if not _G.AutoKill then return end
-    
-    if killCoroutine then
-        task.cancel(killCoroutine)
-        killCoroutine = nil
-    end
-    
-    killCoroutine = task.spawn(function()
+    task.spawn(function()
         task.wait(5)
-        runBurstKill()
+        for i = 1, 3 do if not _G.AutoKill then break end KillAll() task.wait(0.33) end
         task.wait(2)
-        runBurstKill()
+        for i = 1, 3 do if not _G.AutoKill then break end KillAll() task.wait(0.33) end
     end)
 end
 
@@ -155,36 +140,14 @@ local function sendQueueSignal()
     local MatchmakingRemotes = ReplicatedStorage:FindFirstChild("MatchmakingShared") and ReplicatedStorage.MatchmakingShared:FindFirstChild("Remotes")
     if MatchmakingRemotes then
         local activeModes = {}
-        for mode, selected in pairs(_G.SelectedModes) do
-            if selected then table.insert(activeModes, mode) end
-        end
+        for mode, selected in pairs(_G.SelectedModes) do if selected then table.insert(activeModes, mode) end end
         if #activeModes > 0 then
             pcall(function()
                 if MatchmakingRemotes:FindFirstChild("SetModes") then MatchmakingRemotes.SetModes:FireServer(activeModes) end
                 task.wait(1)
-                if MatchmakingRemotes:FindFirstChild("QueueModes") then 
-                    MatchmakingRemotes.QueueModes:InvokeServer(activeModes) 
-                end
+                if MatchmakingRemotes:FindFirstChild("QueueModes") then MatchmakingRemotes.QueueModes:InvokeServer(activeModes) end
             end)
         end
-    end
-end
-
-local function StartAutoQueue()
-    if queueCoroutine then
-        task.cancel(queueCoroutine)
-        queueCoroutine = nil
-    end
-    
-    if _G.AutoQueue then
-        queueCoroutine = task.spawn(function()
-            while _G.AutoQueue do
-                if not _G.InCleanupWait and not _G.IsMatched and not WinLimitReached then
-                    sendQueueSignal()
-                end
-                task.wait(10) -- 10초 주기 반복 적용
-            end
-        end)
     end
 end
 
@@ -204,7 +167,17 @@ MatchmakingTab:CreateDropdown({
 MatchmakingTab:CreateToggle({ Name = "Auto Rematch", CurrentValue = false, Flag = "AutoRematch", Callback = function(Value) _G.AutoRematch = Value end })
 
 MatchmakingTab:CreateSection("Auto Queue")
-MatchmakingTab:CreateToggle({ Name = "Auto Queue", CurrentValue = false, Flag = "AutoQueue", Callback = function(Value) _G.AutoQueue = Value StartAutoQueue() end })
+MatchmakingTab:CreateToggle({ Name = "Auto Queue", CurrentValue = false, Flag = "AutoQueue", Callback = function(Value) 
+    _G.AutoQueue = Value 
+    if Value then
+        task.spawn(function()
+            while _G.AutoQueue do
+                if not _G.InCleanupWait and not _G.IsMatched and not WinLimitReached then sendQueueSignal() end
+                task.wait(10)
+            end
+        end)
+    end
+end })
 
 MatchmakingTab:CreateSection("Select Modes")
 for _, mode in ipairs({"1v1", "2v2", "3v3", "4v4"}) do
@@ -215,15 +188,13 @@ MatchmakingTab:CreateSection("Automatic Duel System")
 MatchmakingTab:CreateInput({ Name = "User ID", PlaceholderText = "Enter Target UserID...", Callback = function(Text) _G.TargetDuelUserId = tonumber(Text) or 0 end })
 MatchmakingTab:CreateToggle({ Name = "Auto Duel", CurrentValue = false, Callback = function(Value)
     _G.AutoDuelChallenge = Value
-    if duelChallengeCoroutine then task.cancel(duelChallengeCoroutine) duelChallengeCoroutine = nil end
     if Value then
-        duelChallengeCoroutine = task.spawn(function()
+        task.spawn(function()
             while _G.AutoDuelChallenge do
                 local RequestSendRemote = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("PlayerRequestSend")
                 if _G.TargetDuelUserId > 0 and RequestSendRemote and not _G.IsMatched and not _G.InCleanupWait then
                     pcall(function() RequestSendRemote:InvokeServer({Type = "Duel", TargetUserId = _G.TargetDuelUserId}) end)
-                    local checkTime = 0
-                    while checkTime < 5 and not _G.IsMatched and _G.AutoDuelChallenge do task.wait(0.5) checkTime = checkTime + 0.5 end
+                    task.wait(10) -- 10초 간격 시도
                 else task.wait(2) end
             end
         end)
