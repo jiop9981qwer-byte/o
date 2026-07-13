@@ -241,7 +241,6 @@ for _, mode in ipairs({"1v1", "2v2", "3v3", "4v4"}) do
     })
 end
 
--- [[ NEW: AUTOMATIC DUEL SYSTEM SECTION ]]
 MatchmakingTab:CreateSection("Automatic Duel System")
 
 MatchmakingTab:CreateInput({
@@ -269,7 +268,6 @@ MatchmakingTab:CreateToggle({
             duelChallengeCoroutine = task.spawn(function()
                 local RequestSendRemote = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("PlayerRequestSend")
                 while _G.AutoDuelChallenge do
-                    -- 매칭이 이미 되어있거나, 클린업 대기상태가 아닐 때만 안전하게 신청 송신
                     if _G.TargetDuelUserId > 0 and RequestSendRemote and not _G.IsMatched and not _G.InCleanupWait then
                         pcall(function()
                             RequestSendRemote:InvokeServer({
@@ -278,7 +276,6 @@ MatchmakingTab:CreateToggle({
                             })
                         end)
                         
-                        -- 도배 에러 방지: 신호를 1번 보낸 후 상대 수락을 위해 최대 5초 대기 (그 사이 매칭 성공시 즉시 루프 패스)
                         local checkTime = 0
                         while checkTime < 5 and not _G.IsMatched and _G.AutoDuelChallenge do
                             task.wait(0.5)
@@ -372,28 +369,36 @@ task.spawn(function()
     local Remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
     local MatchmakingRemotes = ReplicatedStorage:WaitForChild("MatchmakingShared", 10) and ReplicatedStorage.MatchmakingShared:WaitForChild("Remotes", 10)
     
-    -- 듀얼 및 매치메이킹 요청 수신 리스너 가로채기
     if Remotes then
         local RoundCleanup = Remotes:WaitForChild("RoundCleanup", 10)
         local ClientLoaded = Remotes:WaitForChild("ClientLoaded", 10)
         local RequestNotify = Remotes:WaitForChild("PlayerRequestNotify", 10)
-        local RequestSendRemote = Remotes:FindFirstChild("PlayerRequestSend")
         
         if RoundCleanup then RoundCleanup.OnClientEvent:Connect(function(matchId) if matchId and type(matchId) == "string" then _G.CurrentMatchId = matchId end WinLimitReached = false TriggerSmartKill() end) end
         if ClientLoaded then ClientLoaded.OnClientEvent:Connect(function(matchId) if matchId and type(matchId) == "string" then _G.CurrentMatchId = matchId end WinLimitReached = false TriggerSmartKill() end) end
         
-        -- [부계정 전용 수락 엔진] 본계정이 보낸 이벤트를 감지하자마자 서버 도배 없이 정확히 수락
-        if RequestNotify and RequestSendRemote then
+        if RequestNotify then
             RequestNotify.OnClientEvent:Connect(function(data)
                 if _G.AutoAcceptDuel and data and data.Type == "Duel" then
+                    task.wait(0.3)
                     pcall(function()
-                        task.wait(0.1)
-                        local targetId = data.SenderUserId or data.TargetUserId or _G.TargetDuelUserId
-                        
-                        -- 인자 형식의 다변화를 모두 방어하기 위한 스마트 다중 호출 구조
-                        RequestSendRemote:InvokeServer({Type = "Accept", TargetUserId = targetId})
-                        RequestSendRemote:InvokeServer({Type = "DuelAccept", TargetUserId = targetId})
-                        RequestSendRemote:InvokeServer({Type = "Duel", Action = "Accept", TargetUserId = targetId})
+                        local PlayerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+                        if PlayerGui then
+                            for _, gui in ipairs(PlayerGui:GetDescendants()) do
+                                if gui:IsA("TextButton") or gui:IsA("ImageButton") then
+                                    if gui.Text == "수락" or string.find(string.lower(gui.Name), "accept") or string.find(string.lower(gui.Name), "수락") then
+                                        local btnPos = gui.AbsolutePosition
+                                        local btnSize = gui.AbsoluteSize
+                                        local centerX = btnPos.X + (btnSize.X / 2)
+                                        local centerY = btnPos.Y + (btnSize.Y / 2)
+                                        
+                                        VirtualUser:CaptureController()
+                                        VirtualUser:ClickButton1(Vector2.new(centerX, centerY))
+                                        break
+                                    end
+                                end
+                            end
+                        end
                     end)
                 end
             end)
