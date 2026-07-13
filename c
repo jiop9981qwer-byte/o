@@ -108,38 +108,40 @@ local function KillAll()
     end
 end
 
+-- 3/s 속도로 1초 동안 (총 3회) KillAll을 실행하는 헬퍼 함수
+local function runBurstKill()
+    for i = 1, 3 do
+        if not _G.AutoKill then break end
+        KillAll()
+        task.wait(0.33) -- 초당 3회를 맞추기 위한 딜레이
+    end
+end
+
 -- [[ UPDATED SMART KILL LOGIC ]]
 local killCoroutine = nil
+
 local function TriggerSmartKill()
     _G.InRematchLoop = false
     if not _G.AutoKill then return end
     
-    -- 기존에 실행 중인 킬 루틴이 있다면 취소하여 중복 방지
+    -- 기존에 실행 중인 코루틴이 있다면 확실하게 취소하여 스크립트 꼬임 방지
     if killCoroutine then
         task.cancel(killCoroutine)
         killCoroutine = nil
     end
     
     killCoroutine = task.spawn(function()
-        -- 1. 라운드클린업 이후 5초 대기
+        -- 1. 라운드 클린업 이후 5초 대기
         task.wait(5)
         
-        -- 2. 2초간 초당 10회(10/s) 발사 (총 20회)
-        for i = 1, 20 do
-            if not _G.AutoKill then break end
-            KillAll()
-            task.wait(0.1)
-        end
+        -- 2. 1초 동안 3/s로 발사 (총 3회 실행)
+        runBurstKill()
         
-        -- 3. 1초간 정지
-        task.wait(1)
+        -- 3. 2초 뒤에 (2초 대기)
+        task.wait(2)
         
-        -- 4. 다시 2초간 초당 10회(10/s) 발사 (총 20회)
-        for i = 1, 20 do
-            if not _G.AutoKill then break end
-            KillAll()
-            task.wait(0.1)
-        end
+        -- 4. 다시 1초 동안 3/s로 발사 (총 3회 실행)
+        runBurstKill()
     end)
 end
 
@@ -161,7 +163,7 @@ local function StartAutoQueue()
         end
     end
 end
-
+	
 -- [[ UI ELEMENTS ]]
 
 CombatTab:CreateSection("Kill Functions")
