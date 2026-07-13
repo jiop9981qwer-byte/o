@@ -1,4 +1,5 @@
-local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TeleportService = game:GetService("TeleportService")
@@ -13,7 +14,7 @@ _G.AutoKill = false
 _G.AutoQueue = false
 _G.AutoRematch = false
 _G.AntiAFK = false
-_G.AutoStreakRestore = false  -- 연승 복구 토글 변수
+_G.AutoStreakRestore = false
 _G.RematchLimit = 7
 _G.SelectedModes = {["1v1"] = false, ["2v2"] = false, ["3v3"] = false, ["4v4"] = false}
 _G.IsMatched = false
@@ -24,7 +25,7 @@ local killThread = nil
 -- [[ FILE STORAGE PATHS ]]
 local ID_CONFIG_FILE = "KojiHUD_SavedIDs.json"
 local CONFIG_FOLDER = "KojiHUD_Configs/"
-local PERMANENT_AUTOSAVE_FILE = "KojiHUD_AutoSave.json" -- 완전 자동 저장용 파일
+local PERMANENT_AUTOSAVE_FILE = "KojiHUD_AutoSave.json"
 
 if not isfolder(CONFIG_FOLDER) then makefolder(CONFIG_FOLDER) end
 
@@ -55,24 +56,25 @@ end
 
 loadSavedIDs()
 
--- [[ UI SETUP ]]
-local Window = Fluent:CreateWindow({
-    Title = "Koji HUD",
-    SubTitle = "by Koji",
-    TabWidth = 160,
-    Size = UDim2.fromOffset(580, 580),
-    Acrylic = true,
-    Theme = "Dark",
-    MinimizeKey = Enum.KeyCode.LeftControl
+-- [[ RAYFIELD WINDOW SETUP ]]
+local Window = Rayfield:CreateWindow({
+    Name = "Koji HUD | by Koji",
+    LoadingTitle = "Koji HUD Loading...",
+    LoadingSubtitle = "Please wait",
+    ConfigurationSaving = {
+        Enabled = false -- 커스텀 JSON 제어를 위해 Rayfield 기본 세이브 기능은 끕니다.
+    },
+    KeySystem = false
 })
 
--- 탭 구성 (종합 기능인 Main 탭을 상단에 추가)
-local MainTab = Window:AddTab({ Title = "Main", Icon = "home" })
-local CombatTab = Window:AddTab({ Title = "Combat", Icon = "sword" })
-local MatchmakingTab = Window:AddTab({ Title = "Matchmaking", Icon = "user" })
-local SettingsTab = Window:AddTab({ Title = "Settings", Icon = "settings" })
+-- 탭 생성
+local MainTab = Window:CreateTab("Main", "home")
+local CombatTab = Window:CreateTab("Combat", "sword")
+local MatchmakingTab = Window:CreateTab("Matchmaking", "user")
+local SettingsTab = Window:CreateTab("Settings", "settings")
 
-local Options = Fluent.Options
+-- UI 요소 조작용 참조 테이블 (실시간 값 적용 및 동기화 목적)
+local Elements = {}
 
 -- [[ CONFIG & AUTOSAVE CORE LOGIC ]]
 local function GetConfigList()
@@ -86,50 +88,42 @@ local function GetConfigList()
     return list
 end
 
--- UI의 모든 현재 세팅 값을 가져오는 함수
 local function GetCurrentSettingsTable()
     return {
-        AutoKill = Options.AutoKillToggle and Options.AutoKillToggle.Value or false,
-        AutoStreakRestore = Options.StreakRestoreToggle and Options.StreakRestoreToggle.Value or false,
-        RematchLimit = Options.RematchDropdown and Options.RematchDropdown.Value or "7",
-        AutoRematch = Options.AutoRematchToggle and Options.AutoRematchToggle.Value or false,
-        AutoQueue = Options.AutoQueueToggle and Options.AutoQueueToggle.Value or false,
-        SelectedModes = {
-            ["1v1"] = Options.ModeToggle_1v1 and Options.ModeToggle_1v1.Value or false,
-            ["2v2"] = Options.ModeToggle_2v2 and Options.ModeToggle_2v2.Value or false,
-            ["3v3"] = Options.ModeToggle_3v3 and Options.ModeToggle_3v3.Value or false,
-            ["4v4"] = Options.ModeToggle_4v4 and Options.ModeToggle_4v4.Value or false,
-        },
-        AutoDuel = Options.AutoDuelToggle and Options.AutoDuelToggle.Value or false,
-        AutoAccept = Options.AutoAcceptToggle and Options.AutoAcceptToggle.Value or false,
-        AntiAFK = Options.AntiAFKToggle and Options.AntiAFKToggle.Value or false
+        AutoKill = _G.AutoKill,
+        AutoStreakRestore = _G.AutoStreakRestore,
+        RematchLimit = tostring(_G.RematchLimit),
+        AutoRematch = _G.AutoRematch,
+        AutoQueue = _G.AutoQueue,
+        SelectedModes = _G.SelectedModes,
+        AutoDuel = _G.AutoDuelChallenge,
+        AutoAccept = _G.AutoAcceptDuel,
+        AntiAFK = _G.AntiAFK
     }
 end
 
--- 테이블 데이터를 바탕으로 UI 컴포넌트 값을 복구하는 함수
 local function ApplySettingsTable(data)
     if not data or type(data) ~= "table" then return end
     pcall(function()
-        if Options.AutoKillToggle and data.AutoKill ~= nil then Options.AutoKillToggle:SetValue(data.AutoKill) end
-        if Options.StreakRestoreToggle and data.AutoStreakRestore ~= nil then Options.StreakRestoreToggle:SetValue(data.AutoStreakRestore) end
-        if Options.RematchDropdown and data.RematchLimit ~= nil then Options.RematchDropdown:SetValue(data.RematchLimit) end
-        if Options.AutoRematchToggle and data.AutoRematch ~= nil then Options.AutoRematchToggle:SetValue(data.AutoRematch) end
-        if Options.AutoQueueToggle and data.AutoQueue ~= nil then Options.AutoQueueToggle:SetValue(data.AutoQueue) end
+        if data.AutoKill ~= nil and Elements.AutoKillToggle then Elements.AutoKillToggle:Set(data.AutoKill) end
+        if data.AutoStreakRestore ~= nil and Elements.StreakRestoreToggle then Elements.StreakRestoreToggle:Set(data.AutoStreakRestore) end
+        if data.RematchLimit ~= nil and Elements.RematchDropdown then Elements.RematchDropdown:Set({data.RematchLimit}) end
+        if data.AutoRematch ~= nil and Elements.AutoRematchToggle then Elements.AutoRematchToggle:Set(data.AutoRematch) end
+        if data.AutoQueue ~= nil and Elements.AutoQueueToggle then Elements.AutoQueueToggle:Set(data.AutoQueue) end
         
         if data.SelectedModes then
-            if Options.ModeToggle_1v1 and data.SelectedModes["1v1"] ~= nil then Options.ModeToggle_1v1:SetValue(data.SelectedModes["1v1"]) end
-            if Options.ModeToggle_2v2 and data.SelectedModes["2v2"] ~= nil then Options.ModeToggle_2v2:SetValue(data.SelectedModes["2v2"]) end
-            if Options.ModeToggle_3v3 and data.SelectedModes["3v3"] ~= nil then Options.ModeToggle_3v3:SetValue(data.SelectedModes["3v3"]) end
-            if Options.ModeToggle_4v4 and data.SelectedModes["4v4"] ~= nil then Options.ModeToggle_4v4:SetValue(data.SelectedModes["4v4"]) end
+            for mode, val in pairs(data.SelectedModes) do
+                _G.SelectedModes[mode] = val
+                if Elements["ModeToggle_"..mode] then Elements["ModeToggle_"..mode]:Set(val) end
+            end
         end
         
-        if Options.AutoDuelToggle and data.AutoDuel ~= nil then Options.AutoDuelToggle:SetValue(data.AutoDuel) end
-        if Options.AutoAcceptToggle and data.AutoAccept ~= nil then Options.AutoAcceptToggle:SetValue(data.AutoAccept) end
-        if Options.AntiAFKToggle and data.AntiAFK ~= nil then Options.AntiAFKToggle:SetValue(data.AntiAFK) end
+        if data.AutoDuel ~= nil and Elements.AutoDuelToggle then Elements.AutoDuelToggle:Set(data.AutoDuel) end
+        if data.AutoAccept ~= nil and Elements.AutoAcceptToggle then Elements.AutoAcceptToggle:Set(data.AutoAccept) end
+        if data.AntiAFK ~= nil and Elements.AntiAFKToggle then Elements.AntiAFKToggle:Set(data.AntiAFK) end
     end)
 end
 
--- [완전 실시간 자동저장 기능]
 local function TriggerPermanentAutoSave()
     local currentData = GetCurrentSettingsTable()
     writefile(PERMANENT_AUTOSAVE_FILE, HttpService:JSONEncode(currentData))
@@ -154,7 +148,7 @@ local function DeleteConfigData(configName)
     if isfile(path) then delfile(path) end
 end
 
--- [[ CORE FUNCTIONS ]]
+-- [[ GAMEPLAY CORE FUNCTIONS ]]
 local function ServerHop()
     local success = pcall(function()
         local servers = HttpService:JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"))
@@ -202,22 +196,19 @@ local function KillAll()
     end
 end
 
--- 연승 복구 실행 함수
 local function TryStreakRestore()
     if not _G.AutoStreakRestore then return end
     pcall(function()
         local StreakEvent = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("StreakRestore")
         if StreakEvent and StreakEvent:IsA("RemoteFunction") then
             StreakEvent:InvokeServer("Restore")
-            Fluent:Notify({Title = "Streak System", Content = "Streak Restore Automatically Triggered!", Duration = 3})
+            Rayfield:Notify({Title = "Streak System", Content = "Streak Restore Automatically Triggered!", Duration = 3, Image = 4483362458})
         end
     end)
 end
 
 local function OnRoundCleanup()
-    -- 매치 종료 시점 처리
     TryStreakRestore()
-    
     if not _G.AutoQueue and not _G.AutoDuelChallenge then return end
     _G.InCleanupWait = true
     task.delay(38, function() _G.InCleanupWait = false end)
@@ -260,118 +251,136 @@ local function sendQueueSignal()
 end
 
 
--- [[ UI ELEMENTS ]]
+-- [[ UI ELEMENTS GENERATION ]]
 
--- 1. MAIN TAB (종합 기능 칸)
-MainTab:AddSection("Main General Features")
-local StreakRestoreToggle = MainTab:AddToggle("StreakRestoreToggle", { Title = "Auto Streak Restore (On Match End)", Default = false })
-StreakRestoreToggle:OnChanged(function()
-    _G.AutoStreakRestore = StreakRestoreToggle.Value
-    TriggerPermanentAutoSave() -- 값 변경 시 실시간 세이브
-end)
+-- 1. MAIN TAB
+MainTab:CreateSection("Main General Features")
+Elements.StreakRestoreToggle = MainTab:CreateToggle({
+    Name = "Auto Streak Restore (On Match End)",
+    CurrentValue = false,
+    Callback = function(Value)
+        _G.AutoStreakRestore = Value
+        TriggerPermanentAutoSave()
+    end,
+})
 
-MainTab:AddButton({
-    Title = "Manual Streak Restore Now",
+MainTab:CreateButton({
+    Name = "Manual Streak Restore Now",
     Callback = function()
         pcall(function()
             local StreakEvent = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("StreakRestore")
             if StreakEvent then 
                 StreakEvent:InvokeServer("Restore") 
-                Fluent:Notify({Title = "Streak System", Content = "Manual Restore Executed!", Duration = 3})
+                Rayfield:Notify({Title = "Streak System", Content = "Manual Restore Executed!", Duration = 3, Image = 4483362458})
             end
         end)
-    end
+    end,
 })
 
 -- 2. COMBAT TAB
-CombatTab:AddSection("Kill Functions")
-CombatTab:AddButton({ Title = "Kill All (Instant)", Callback = function() KillAll() end })
+CombatTab:CreateSection("Kill Functions")
+CombatTab:CreateButton({
+    Name = "Kill All (Instant)",
+    Callback = function() KillAll() end,
+})
 
-local AutoKillToggle = CombatTab:AddToggle("AutoKillToggle", { Title = "Auto Kill", Default = false })
-AutoKillToggle:OnChanged(function() 
-    _G.AutoKill = AutoKillToggle.Value 
-    TriggerPermanentAutoSave() -- 값 변경 시 실시간 세이브
-end)
+Elements.AutoKillToggle = CombatTab:CreateToggle({
+    Name = "Auto Kill",
+    CurrentValue = false,
+    Callback = function(Value)
+        _G.AutoKill = Value
+        TriggerPermanentAutoSave()
+    end,
+})
 
 -- 3. MATCHMAKING TAB
-MatchmakingTab:AddSection("Auto Rematch Settings")
-local RematchDropdown = MatchmakingTab:AddDropdown("RematchDropdown", {
-    Title = "Win Limit (Server Hop)",
-    Values = {"1", "2", "3", "4", "5", "6", "7", "8"},
-    CurrentValue = "7"
-})
-RematchDropdown:OnChanged(function(Value) 
-    _G.RematchLimit = tonumber(Value) 
-    TriggerPermanentAutoSave()
-end)
-
-local AutoRematchToggle = MatchmakingTab:AddToggle("AutoRematchToggle", { Title = "Auto Rematch", Default = false })
-AutoRematchToggle:OnChanged(function() 
-    _G.AutoRematch = AutoRematchToggle.Value 
-    TriggerPermanentAutoSave()
-end)
-
-MatchmakingTab:AddSection("Auto Queue")
-local AutoQueueToggle = MatchmakingTab:AddToggle("AutoQueueToggle", { Title = "Auto Queue", Default = false })
-AutoQueueToggle:OnChanged(function() 
-    _G.AutoQueue = AutoQueueToggle.Value 
-    TriggerPermanentAutoSave()
-    if _G.AutoQueue then 
-        task.spawn(function() 
-            while _G.AutoQueue do 
-                if not _G.InCleanupWait and not _G.IsMatched then sendQueueSignal() end 
-                task.wait(10) 
-            end 
-        end) 
-    end
-end)
-
-MatchmakingTab:AddSection("Select Modes")
-for _, mode in ipairs({"1v1", "2v2", "3v3", "4v4"}) do
-    local ModeToggle = MatchmakingTab:AddToggle("ModeToggle_"..mode, { Title = "Mode: " .. mode, Default = false })
-    ModeToggle:OnChanged(function() 
-        _G.SelectedModes[mode] = ModeToggle.Value 
+MatchmakingTab:CreateSection("Auto Rematch Settings")
+Elements.RematchDropdown = MatchmakingTab:CreateDropdown({
+    Name = "Win Limit (Server Hop)",
+    Options = {"1", "2", "3", "4", "5", "6", "7", "8"},
+    CurrentOption = {"7"},
+    MultipleOptions = false,
+    Callback = function(Option)
+        _G.RematchLimit = tonumber(Option[1]) or 7
         TriggerPermanentAutoSave()
-    end)
+    end,
+})
+
+Elements.AutoRematchToggle = MatchmakingTab:CreateToggle({
+    Name = "Auto Rematch",
+    CurrentValue = false,
+    Callback = function(Value)
+        _G.AutoRematch = Value
+        TriggerPermanentAutoSave()
+    end,
+})
+
+MatchmakingTab:CreateSection("Auto Queue")
+Elements.AutoQueueToggle = MatchmakingTab:CreateToggle({
+    Name = "Auto Queue",
+    CurrentValue = false,
+    Callback = function(Value)
+        _G.AutoQueue = Value
+        TriggerPermanentAutoSave()
+        if _G.AutoQueue then 
+            task.spawn(function() 
+                while _G.AutoQueue do 
+                    if not _G.InCleanupWait and not _G.IsMatched then sendQueueSignal() end 
+                    task.wait(10) 
+                end 
+            end) 
+        end
+    end,
+})
+
+MatchmakingTab:CreateSection("Select Modes")
+for _, mode in ipairs({"1v1", "2v2", "3v3", "4v4"}) do
+    Elements["ModeToggle_"..mode] = MatchmakingTab:CreateToggle({
+        Name = "Mode: " .. mode,
+        CurrentValue = false,
+        Callback = function(Value)
+            _G.SelectedModes[mode] = Value
+            TriggerPermanentAutoSave()
+        end,
+    })
 end
 
-MatchmakingTab:AddSection("Automatic Duel System")
-local IDDropdown
+MatchmakingTab:CreateSection("Automatic Duel System")
 local currentSelectedID = savedIDs[1] or ""
 
-MatchmakingTab:AddInput("AddIDInput", {
-    Title = "Add User ID",
-    Placeholder = "Enter Target UserID...",
-    Numeric = true,
-    Finished = true,
+MatchmakingTab:CreateInput({
+    Name = "Add User ID",
+    PlaceholderText = "Enter Target UserID...",
+    RemoveTextAfterFocusLost = true,
     Callback = function(Text)
         local idNum = tonumber(Text)
         if idNum then
             _G.TargetDuelUserId = idNum
             saveID(Text)
             currentSelectedID = tostring(idNum)
-            if IDDropdown then
-                IDDropdown:SetValues(savedIDs)
-                IDDropdown:SetValue(tostring(idNum))
+            if Elements.IDDropdown then
+                Elements.IDDropdown:Refresh(savedIDs, true)
+                Elements.IDDropdown:Set({tostring(idNum)})
             end
         end
-    end
+    end,
 })
 
 if #savedIDs == 0 then table.insert(savedIDs, "") end
 
-IDDropdown = MatchmakingTab:AddDropdown("IDDropdown", {
-    Title = "Select Saved ID",
-    Values = savedIDs,
-    CurrentValue = currentSelectedID
+Elements.IDDropdown = MatchmakingTab:CreateDropdown({
+    Name = "Select Saved ID",
+    Options = savedIDs,
+    CurrentOption = {currentSelectedID},
+    MultipleOptions = false,
+    Callback = function(Option)
+        currentSelectedID = Option[1] or ""
+        _G.TargetDuelUserId = tonumber(currentSelectedID) or 0
+    end,
 })
-IDDropdown:OnChanged(function(Value)
-    currentSelectedID = Value
-    _G.TargetDuelUserId = tonumber(Value) or 0
-end)
 
-MatchmakingTab:AddButton({
-    Title = "Delete Selected ID",
+MatchmakingTab:CreateButton({
+    Name = "Delete Selected ID",
     Callback = function()
         if currentSelectedID and currentSelectedID ~= "" then
             deleteID(currentSelectedID)
@@ -379,131 +388,142 @@ MatchmakingTab:AddButton({
             currentSelectedID = nextID
             _G.TargetDuelUserId = tonumber(nextID) or 0
             if #savedIDs == 0 then table.insert(savedIDs, "") end
-            if IDDropdown then
-                IDDropdown:SetValues(savedIDs)
-                IDDropdown:SetValue(nextID)
+            if Elements.IDDropdown then
+                Elements.IDDropdown:Refresh(savedIDs, true)
+                Elements.IDDropdown:Set({nextID})
             end
         end
-    end
+    end,
 })
 
-local AutoDuelToggle = MatchmakingTab:AddToggle("AutoDuelToggle", { Title = "Auto Duel", Default = false })
-AutoDuelToggle:OnChanged(function()
-    _G.AutoDuelChallenge = AutoDuelToggle.Value
-    TriggerPermanentAutoSave()
-    if _G.AutoDuelChallenge then 
-        task.spawn(function() 
-            while _G.AutoDuelChallenge do 
-                local R = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("PlayerRequestSend") 
-                if _G.TargetDuelUserId and _G.TargetDuelUserId > 0 and R and not _G.IsMatched and not _G.InCleanupWait then 
-                    pcall(function() R:InvokeServer({Type="Duel", TargetUserId=_G.TargetDuelUserId}) end) 
-                    task.wait(10) 
-                else 
-                    task.wait(2) 
+Elements.AutoDuelToggle = MatchmakingTab:CreateToggle({
+    Name = "Auto Duel",
+    CurrentValue = false,
+    Callback = function(Value)
+        _G.AutoDuelChallenge = Value
+        TriggerPermanentAutoSave()
+        if _G.AutoDuelChallenge then 
+            task.spawn(function() 
+                while _G.AutoDuelChallenge do 
+                    local R = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("PlayerRequestSend") 
+                    if _G.TargetDuelUserId and _G.TargetDuelUserId > 0 and R and not _G.IsMatched and not _G.InCleanupWait then 
+                        pcall(function() R:InvokeServer({Type="Duel", TargetUserId=_G.TargetDuelUserId}) end) 
+                        task.wait(10) 
+                    else 
+                        task.wait(2) 
+                    end 
                 end 
-            end 
-        end) 
-    end
-end)
+            end) 
+        end
+    end,
+})
 
-local AutoAcceptToggle = MatchmakingTab:AddToggle("AutoAcceptToggle", { Title = "Auto Accept", Default = false })
-AutoAcceptToggle:OnChanged(function() 
-    _G.AutoAcceptDuel = AutoAcceptToggle.Value 
-    TriggerPermanentAutoSave()
-end)
+Elements.AutoAcceptToggle = MatchmakingTab:CreateToggle({
+    Name = "Auto Accept",
+    CurrentValue = false,
+    Callback = function(Value)
+        _G.AutoAcceptDuel = Value
+        TriggerPermanentAutoSave()
+    end,
+})
 
-MatchmakingTab:AddSection("Misc")
-local AntiAFKToggle = MatchmakingTab:AddToggle("AntiAFKToggle", { Title = "Anti-AFK", Default = false })
-AntiAFKToggle:OnChanged(function() 
-    _G.AntiAFK = AntiAFKToggle.Value 
-    TriggerPermanentAutoSave()
-end)
+MatchmakingTab:CreateSection("Misc")
+Elements.AntiAFKToggle = MatchmakingTab:CreateToggle({
+    Name = "Anti-AFK",
+    CurrentValue = false,
+    Callback = function(Value)
+        _G.AntiAFK = Value
+        TriggerPermanentAutoSave()
+    end,
+})
 
 
--- 4. SETTINGS TAB (정밀 세팅 섹션)
-SettingsTab:AddSection("Configuration")
+-- 4. SETTINGS TAB (해외 허브 스타일 완벽 디자인 정렬)
+SettingsTab:CreateSection("Configuration")
 
 local currentConfigName = ""
 local selectedConfig = "None"
-local ConfigDropdown
 
-SettingsTab:AddInput("ConfigNameInput", {
-    Title = "Config Name",
-    Placeholder = "Write config name here...",
-    Finished = true,
-    Callback = function(Text) currentConfigName = Text end
+SettingsTab:CreateInput({
+    Name = "Config name",
+    PlaceholderText = "Write config name here...",
+    RemoveTextAfterFocusLost = false,
+    Callback = function(Text) currentConfigName = Text end,
 })
 
-SettingsTab:AddButton({
-    Title = "Create Config",
+SettingsTab:CreateButton({
+    Name = "Create config",
     Callback = function()
         if currentConfigName and currentConfigName ~= "" and currentConfigName ~= "None" then
             SaveConfigData(currentConfigName)
-            Fluent:Notify({Title = "Configuration", Content = "Config '"..currentConfigName.."' created!", Duration = 3})
+            Rayfield:Notify({Title = "Configuration", Content = "Config '"..currentConfigName.."' created!", Duration = 3})
             
-            -- 드롭다운 컴포넌트 내부 리스트 데이터 직접 교체 연동 구현
             local newList = GetConfigList()
-            ConfigDropdown.Values = newList
-            ConfigDropdown:BuildDropdownList()
-            ConfigDropdown:SetValue(currentConfigName)
+            if Elements.ConfigDropdown then
+                Elements.ConfigDropdown:Refresh(newList, true)
+                Elements.ConfigDropdown:Set({currentConfigName})
+            end
         else
-            Fluent:Notify({Title = "Error", Content = "Please enter a valid config name.", Duration = 3})
+            Rayfield:Notify({Title = "Error", Content = "Please enter a valid config name.", Duration = 3})
         end
-    end
+    end,
 })
 
-SettingsTab:AddSection("Config List")
+SettingsTab:CreateSection("Config list")
 
-ConfigDropdown = SettingsTab:AddDropdown("ConfigDropdown", {
-    Title = "Select Config File",
-    Values = GetConfigList(),
-    CurrentValue = "None"
+Elements.ConfigDropdown = SettingsTab:CreateDropdown({
+    Name = "Select Config File",
+    Options = GetConfigList(),
+    CurrentOption = {"None"},
+    MultipleOptions = false,
+    Callback = function(Option) selectedConfig = Option[1] or "None" end,
 })
-ConfigDropdown:OnChanged(function(Value) selectedConfig = Value end)
 
-SettingsTab:AddButton({
-    Title = "Load Config",
+SettingsTab:CreateButton({
+    Name = "Load config",
     Callback = function()
         if selectedConfig and selectedConfig ~= "None" then
             LoadConfigData(selectedConfig)
-            Fluent:Notify({Title = "Configuration", Content = "Config '"..selectedConfig.."' loaded!", Duration = 3})
+            Rayfield:Notify({Title = "Configuration", Content = "Config '"..selectedConfig.."' loaded!", Duration = 3})
         end
-    end
+    end,
 })
 
-SettingsTab:AddButton({
-    Title = "Overwrite Config (Save)",
+SettingsTab:CreateButton({
+    Name = "Overwrite config",
     Callback = function()
         if selectedConfig and selectedConfig ~= "None" then
             SaveConfigData(selectedConfig)
-            Fluent:Notify({Title = "Configuration", Content = "Config '"..selectedConfig.."' saved!", Duration = 3})
+            Rayfield:Notify({Title = "Configuration", Content = "Config '"..selectedConfig.."' overwritten/saved!", Duration = 3})
         end
-    end
+    end,
 })
 
-SettingsTab:AddButton({
-    Title = "Delete Config",
+SettingsTab:CreateButton({
+    Name = "Delete config",
     Callback = function()
         if selectedConfig and selectedConfig ~= "None" then
             DeleteConfigData(selectedConfig)
-            Fluent:Notify({Title = "Configuration", Content = "Config '"..selectedConfig.."' deleted.", Duration = 3})
+            Rayfield:Notify({Title = "Configuration", Content = "Config '"..selectedConfig.."' deleted.", Duration = 3})
             
             local newList = GetConfigList()
-            ConfigDropdown.Values = newList
-            ConfigDropdown:BuildDropdownList()
-            ConfigDropdown:SetValue("None")
+            if Elements.ConfigDropdown then
+                Elements.ConfigDropdown:Refresh(newList, true)
+                Elements.ConfigDropdown:Set({"None"})
+            end
         end
-    end
+    end,
 })
 
-SettingsTab:AddButton({
-    Title = "Refresh List",
+SettingsTab:CreateButton({
+    Name = "Refresh list",
     Callback = function()
         local newList = GetConfigList()
-        ConfigDropdown.Values = newList
-        ConfigDropdown:BuildDropdownList()
-        Fluent:Notify({Title = "Configuration", Content = "Config list refreshed.", Duration = 2})
-    end
+        if Elements.ConfigDropdown then
+            Elements.ConfigDropdown:Refresh(newList, true)
+            Rayfield:Notify({Title = "Configuration", Content = "Config list refreshed.", Duration = 2})
+        end
+    end,
 })
 
 
@@ -524,26 +544,24 @@ end)
 
 LocalPlayer.Idled:Connect(function() if _G.AntiAFK then VirtualUser:CaptureController() VirtualUser:ClickButton2(Vector2.new()) end end)
 
--- 실행 시 자동 복구 로드 시스템
+-- 백엔드 실시간 파일 로드 처리
 task.spawn(function() 
     task.wait(0.6)
     
-    -- [Rayfield 스타일 완전 자동복구 기능 적용]
+    -- [실시간 완전 자동저장 불러오기]
     if isfile(PERMANENT_AUTOSAVE_FILE) then
         local success, data = pcall(function() return HttpService:JSONDecode(readfile(PERMANENT_AUTOSAVE_FILE)) end)
         if success and type(data) == "table" then
             ApplySettingsTable(data)
-            Fluent:Notify({Title = "Auto Load", Content = "Your previous options have been automatically restored!", Duration = 4})
+            Rayfield:Notify({Title = "Auto Load", Content = "Options automatically restored!", Duration = 4})
         end
     end
     
-    -- 타겟 ID 목록 복구
-    if IDDropdown and savedIDs and #savedIDs > 0 and savedIDs[1] ~= "" then
-        IDDropdown:SetValues(savedIDs)
+    -- 저장된 타겟 ID 목록 드롭다운 동기화 복구
+    if Elements.IDDropdown and savedIDs and #savedIDs > 0 and savedIDs[1] ~= "" then
+        Elements.IDDropdown:Refresh(savedIDs, true)
         currentSelectedID = savedIDs[1] or ""
         _G.TargetDuelUserId = tonumber(currentSelectedID) or 0
-        IDDropdown:SetValue(currentSelectedID)
+        Elements.IDDropdown:Set({currentSelectedID})
     end
 end)
-
-Window:SelectTab(1)
