@@ -20,8 +20,14 @@ _G.SelectedModes = {["1v1"] = false, ["2v2"] = false, ["3v3"] = false, ["4v4"] =
 _G.IsMatched = false
 _G.InCleanupWait = false
 
+-- [[ AUTOMATIC DUEL STATES ]]
+_G.TargetDuelUserId = 0
+_G.AutoDuelChallenge = false
+_G.AutoAcceptDuel = false
+
 local WinLimitReached = false
 local queueCoroutine = nil
+local duelChallengeCoroutine = nil
 
 -- [[ UI SETUP ]]
 local Window = Rayfield:CreateWindow({
@@ -235,6 +241,67 @@ for _, mode in ipairs({"1v1", "2v2", "3v3", "4v4"}) do
     })
 end
 
+-- [[ NEW: AUTOMATIC DUEL SYSTEM SECTION ]]
+MatchmakingTab:CreateSection("Automatic Duel System")
+
+MatchmakingTab:CreateInput({
+    Name = "User ID",
+    PlaceholderText = "Enter Target UserID...",
+    RemoveTextAfterFocusLost = false,
+    Callback = function(Text)
+        _G.TargetDuelUserId = tonumber(Text) or 0
+    end,
+})
+
+MatchmakingTab:CreateToggle({
+    Name = "Auto Duel",
+    CurrentValue = false,
+    Flag = "AutoDuelChallenge",
+    Callback = function(Value)
+        _G.AutoDuelChallenge = Value
+        
+        if duelChallengeCoroutine then
+            task.cancel(duelChallengeCoroutine)
+            duelChallengeCoroutine = nil
+        end
+        
+        if Value then
+            duelChallengeCoroutine = task.spawn(function()
+                local RequestSendRemote = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("PlayerRequestSend")
+                while _G.AutoDuelChallenge do
+                    -- 매칭이 이미 되어있거나, 클린업 대기상태가 아닐 때만 안전하게 신청 송신
+                    if _G.TargetDuelUserId > 0 and RequestSendRemote and not _G.IsMatched and not _G.InCleanupWait then
+                        pcall(function()
+                            RequestSendRemote:InvokeServer({
+                                Type = "Duel",
+                                TargetUserId = _G.TargetDuelUserId
+                            })
+                        end)
+                        
+                        -- 도배 에러 방지: 신호를 1번 보낸 후 상대 수락을 위해 최대 5초 대기 (그 사이 매칭 성공시 즉시 루프 패스)
+                        local checkTime = 0
+                        while checkTime < 5 and not _G.IsMatched and _G.AutoDuelChallenge do
+                            task.wait(0.5)
+                            checkTime = checkTime + 0.5
+                        end
+                    else
+                        task.wait(2)
+                    end
+                end
+            end)
+        end
+    end,
+})
+
+MatchmakingTab:CreateToggle({
+    Name = "Auto Accept",
+    CurrentValue = false,
+    Flag = "AutoAcceptDuel",
+    Callback = function(Value)
+        _G.AutoAcceptDuel = Value
+    end,
+})
+
 MatchmakingTab:CreateSection("Misc")
 MatchmakingTab:CreateToggle({
     Name = "Anti-AFK",
@@ -305,12 +372,32 @@ task.spawn(function()
     local Remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
     local MatchmakingRemotes = ReplicatedStorage:WaitForChild("MatchmakingShared", 10) and ReplicatedStorage.MatchmakingShared:WaitForChild("Remotes", 10)
     
+    -- 듀얼 및 매치메이킹 요청 수신 리스너 가로채기
     if Remotes then
         local RoundCleanup = Remotes:WaitForChild("RoundCleanup", 10)
         local ClientLoaded = Remotes:WaitForChild("ClientLoaded", 10)
+        local RequestNotify = Remotes:WaitForChild("PlayerRequestNotify", 10)
+        local RequestSendRemote = Remotes:FindFirstChild("PlayerRequestSend")
         
         if RoundCleanup then RoundCleanup.OnClientEvent:Connect(function(matchId) if matchId and type(matchId) == "string" then _G.CurrentMatchId = matchId end WinLimitReached = false TriggerSmartKill() end) end
         if ClientLoaded then ClientLoaded.OnClientEvent:Connect(function(matchId) if matchId and type(matchId) == "string" then _G.CurrentMatchId = matchId end WinLimitReached = false TriggerSmartKill() end) end
+        
+        -- [부계정 전용 수락 엔진] 본계정이 보낸 이벤트를 감지하자마자 서버 도배 없이 정확히 수락
+        if RequestNotify and RequestSendRemote then
+            RequestNotify.OnClientEvent:Connect(function(data)
+                if _G.AutoAcceptDuel and data and data.Type == "Duel" then
+                    pcall(function()
+                        task.wait(0.1)
+                        local targetId = data.SenderUserId or data.TargetUserId or _G.TargetDuelUserId
+                        
+                        -- 인자 형식의 다변화를 모두 방어하기 위한 스마트 다중 호출 구조
+                        RequestSendRemote:InvokeServer({Type = "Accept", TargetUserId = targetId})
+                        RequestSendRemote:InvokeServer({Type = "DuelAccept", TargetUserId = targetId})
+                        RequestSendRemote:InvokeServer({Type = "Duel", Action = "Accept", TargetUserId = targetId})
+                    end)
+                end
+            end)
+        end
     end
 
     if MatchmakingRemotes then
@@ -380,5 +467,5 @@ end)
 
 Rayfield:Notify({
     Title = "Koji HUD",
-    Content = "Burst Kill Logic (3/s) & Queue Delay updated!"
+    Content = "All Automation Systems Integrated successfully!"
 })
