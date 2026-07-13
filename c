@@ -4,7 +4,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 local VirtualUser = game:GetService("VirtualUser")
-local GuiService = game:GetService("GuiService")
 
 local LocalPlayer = Players.LocalPlayer
 while not LocalPlayer do task.wait(0.5) LocalPlayer = Players.LocalPlayer end
@@ -374,54 +373,35 @@ task.spawn(function()
         local RoundCleanup = Remotes:WaitForChild("RoundCleanup", 10)
         local ClientLoaded = Remotes:WaitForChild("ClientLoaded", 10)
         local RequestNotify = Remotes:WaitForChild("PlayerRequestNotify", 10)
+        local RespondRemote = Remotes:WaitForChild("PlayerRequestRespond", 10)
         
         if RoundCleanup then RoundCleanup.OnClientEvent:Connect(function(matchId) if matchId and type(matchId) == "string" then _G.CurrentMatchId = matchId end WinLimitReached = false TriggerSmartKill() end) end
         if ClientLoaded then ClientLoaded.OnClientEvent:Connect(function(matchId) if matchId and type(matchId) == "string" then _G.CurrentMatchId = matchId end WinLimitReached = false TriggerSmartKill() end) end
         
-        if RequestNotify then
+        if RequestNotify and RespondRemote then
             RequestNotify.OnClientEvent:Connect(function(data)
-                if _G.AutoAcceptDuel and data and data.Type == "Duel" then
-                    task.wait(0.3)
-                    pcall(function()
-                        local PlayerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
-                        if PlayerGui then
-                            for _, gui in ipairs(PlayerGui:GetDescendants()) do
-                                if gui:IsA("TextButton") or gui:IsA("ImageButton") then
-                                    local match = false
-                                    if gui.Text == "수락" or string.find(string.lower(gui.Name), "accept") or string.find(string.lower(gui.Name), "수락") then
-                                        match = true
-                                    elseif gui:FindFirstChildOfClass("TextLabel") then
-                                        local tl = gui:FindFirstChildOfClass("TextLabel")
-                                        if tl.Text == "수락" or string.find(string.lower(tl.Name), "accept") or string.find(string.lower(tl.Name), "수락") then
-                                            match = true
-                                        end
-                                    end
-                                    
-                                    if match and gui.AbsoluteSize.X > 0 and gui.AbsoluteSize.Y > 0 then
-                                        local viewPortSize = workspace.CurrentCamera.ViewportSize
-                                        local targetX = viewPortSize.X - 120
-                                        local targetY = viewPortSize.Y - 40
-                                        
-                                        local btnPos = gui.AbsolutePosition
-                                        local btnSize = gui.AbsoluteSize
-                                        if btnPos.X > 0 and btnPos.Y > 0 then
-                                            targetX = btnPos.X + (btnSize.X / 2)
-                                            targetY = btnPos.Y + (btnSize.Y / 2)
-                                        end
-                                        
-                                        VirtualUser:CaptureController()
-                                        VirtualUser:ClickButton1(Vector2.new(targetX, targetY))
-                                        
-                                        for i = 1, 3 do
-                                            task.wait(0.05)
-                                            VirtualUser:ClickButton1(Vector2.new(targetX, targetY))
-                                        end
-                                        break
-                                    end
+                if _G.AutoAcceptDuel and data then
+                    local requestId = nil
+                    
+                    if type(data) == "table" then
+                        requestId = data.Id or data.id or data.RequestId or data.UUID or data.Type
+                        if not requestId then
+                            for k, v in pairs(data) do
+                                if type(v) == "string" and string.len(v) == 36 and string.find(v, "-") then
+                                    requestId = v
+                                    break
                                 end
                             end
                         end
-                    end)
+                    elseif type(data) == "string" then
+                        requestId = data
+                    end
+                    
+                    if requestId then
+                        pcall(function()
+                            RespondRemote:FireServer(requestId, true)
+                        end)
+                    end
                 end
             end)
         end
@@ -484,49 +464,6 @@ task.spawn(function()
             sendQueueSignal()
         end
         task.wait(10)
-    end
-end)
-
--- Ultimate Fallback Screen Scanner
-task.spawn(function()
-    while task.wait(0.5) do
-        if _G.AutoAcceptDuel and not _G.IsMatched then
-            pcall(function()
-                local PlayerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
-                if PlayerGui then
-                    for _, gui in ipairs(PlayerGui:GetDescendants()) do
-                        if gui:IsA("TextButton") or gui:IsA("ImageButton") then
-                            local found = false
-                            if gui.Text == "수락" or string.find(string.lower(gui.Name), "accept") or string.find(string.lower(gui.Name), "수락") then
-                                found = true
-                            elseif gui:FindFirstChildOfClass("TextLabel") then
-                                local tl = gui:FindFirstChildOfClass("TextLabel")
-                                if tl.Text == "수락" or string.find(string.lower(tl.Name), "accept") or string.find(string.lower(tl.Name), "수락") then
-                                    found = true
-                                end
-                            end
-                            
-                            if found and gui.AbsoluteSize.X > 0 and gui.AbsoluteSize.Y > 0 then
-                                local viewPortSize = workspace.CurrentCamera.ViewportSize
-                                local targetX = viewPortSize.X - 120
-                                local targetY = viewPortSize.Y - 40
-                                
-                                local btnPos = gui.AbsolutePosition
-                                local btnSize = gui.AbsoluteSize
-                                if btnPos.X > 0 and btnPos.Y > 0 then
-                                    targetX = btnPos.X + (btnSize.X / 2)
-                                    targetY = btnPos.Y + (btnSize.Y / 2)
-                                end
-                                
-                                VirtualUser:CaptureController()
-                                VirtualUser:ClickButton1(Vector2.new(targetX, targetY))
-                                break
-                            end
-                        end
-                    end
-                end
-            end)
-        end
     end
 end)
 
