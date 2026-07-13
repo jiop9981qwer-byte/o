@@ -18,8 +18,10 @@ _G.CurrentGameNumber = 1
 _G.CurrentMatchId = ""
 _G.SelectedModes = {["1v1"] = false, ["2v2"] = false, ["3v3"] = false, ["4v4"] = false}
 _G.IsMatched = false
+_G.InCleanupWait = false
 
 local WinLimitReached = false
+local queueCoroutine = nil
 
 -- [[ UI SETUP ]]
 local Window = Rayfield:CreateWindow({
@@ -37,7 +39,7 @@ local CombatTab = Window:CreateTab("Combat", 4483362458)
 local MatchmakingTab = Window:CreateTab("Matchmaking", 4483362458)
 local ConfigTab = Window:CreateTab("Settings", 4483362458)
 
--- [[ FUNCTIONS (100% RESTORED FROM ORIGINAL) ]]
+-- [[ FUNCTIONS ]]
 
 local function ServerHop()
     local success = pcall(function()
@@ -108,44 +110,43 @@ local function KillAll()
     end
 end
 
--- 3/s 속도로 1초 동안 (총 3회) KillAll을 실행하는 헬퍼 함수
 local function runBurstKill()
     for i = 1, 3 do
         if not _G.AutoKill then break end
         KillAll()
-        task.wait(0.33) -- 초당 3회를 맞추기 위한 딜레이
+        task.wait(0.33)
     end
 end
 
--- [[ UPDATED SMART KILL LOGIC ]]
-local killCoroutine = nil
+local function OnRoundCleanup()
+    if not _G.AutoQueue then return end
+    task.spawn(function()
+        _G.InCleanupWait = true
+        task.wait(60)
+        _G.InCleanupWait = false
+    end)
+end
 
+local killCoroutine = nil
 local function TriggerSmartKill()
     _G.InRematchLoop = false
+    OnRoundCleanup()
     if not _G.AutoKill then return end
     
-    -- 기존에 실행 중인 코루틴이 있다면 확실하게 취소하여 스크립트 꼬임 방지
     if killCoroutine then
         task.cancel(killCoroutine)
         killCoroutine = nil
     end
     
     killCoroutine = task.spawn(function()
-        -- 1. 라운드 클린업 이후 5초 대기
         task.wait(5)
-        
-        -- 2. 1초 동안 3/s로 발사 (총 3회 실행)
         runBurstKill()
-        
-        -- 3. 2초 뒤에 (2초 대기)
         task.wait(2)
-        
-        -- 4. 다시 1초 동안 3/s로 발사 (총 3회 실행)
         runBurstKill()
     end)
 end
 
-local function StartAutoQueue()
+local function sendQueueSignal()
     local MatchmakingRemotes = ReplicatedStorage:FindFirstChild("MatchmakingShared") and ReplicatedStorage.MatchmakingShared:FindFirstChild("Remotes")
     if MatchmakingRemotes then
         local activeModes = {}
@@ -163,7 +164,25 @@ local function StartAutoQueue()
         end
     end
 end
-	
+
+local function StartAutoQueue()
+    if queueCoroutine then
+        task.cancel(queueCoroutine)
+        queueCoroutine = nil
+    end
+    
+    if _G.AutoQueue then
+        queueCoroutine = task.spawn(function()
+            while _G.AutoQueue do
+                if not _G.InCleanupWait and not _G.IsMatched and not WinLimitReached then
+                    sendQueueSignal()
+                end
+                task.wait(5)
+            end
+        end)
+    end
+end
+
 -- [[ UI ELEMENTS ]]
 
 CombatTab:CreateSection("Kill Functions")
@@ -180,13 +199,13 @@ CombatTab:CreateToggle({
 
 MatchmakingTab:CreateSection("Auto Rematch Settings")
 MatchmakingTab:CreateDropdown({
-	Name = "Win Limit (Server Hop)",
-	Options = {"1", "2", "3", "4", "5", "6", "7", "8"},
-	CurrentOption = "7",
-	Flag = "WinLimit",
-	Callback = function(Option)
-		_G.RematchLimit = tonumber(Option)
-	end,
+    Name = "Win Limit (Server Hop)",
+    Options = {"1", "2", "3", "4", "5", "6", "7", "8"},
+    CurrentOption = "7",
+    Flag = "WinLimit",
+    Callback = function(Option)
+        _G.RematchLimit = tonumber(Option)
+    end,
 })
 MatchmakingTab:CreateToggle({
     Name = "Auto Rematch",
@@ -202,7 +221,7 @@ MatchmakingTab:CreateToggle({
     Flag = "AutoQueue",
     Callback = function(Value) 
         _G.AutoQueue = Value 
-        if Value then StartAutoQueue() end
+        StartAutoQueue()
     end,
 })
 
@@ -227,42 +246,42 @@ MatchmakingTab:CreateToggle({
 ConfigTab:CreateSection("Configuration Management")
 local ConfigName = ""
 ConfigTab:CreateInput({
-	Name = "Config Name",
-	PlaceholderText = "Enter name (e.g. farm)",
-	RemoveTextAfterFocusLost = false,
-	Callback = function(Text) ConfigName = Text end,
+    Name = "Config Name",
+    PlaceholderText = "Enter name (e.g. farm)",
+    RemoveTextAfterFocusLost = false,
+    Callback = function(Text) ConfigName = Text end,
 })
 ConfigTab:CreateButton({
-	Name = "Create & Save Config",
-	Callback = function()
-		if ConfigName ~= "" then
-			Rayfield:SaveConfiguration(ConfigName)
-			Rayfield:Notify({Title = "Config", Content = "Saved: " .. ConfigName})
-		end
-	end,
+    Name = "Create & Save Config",
+    Callback = function()
+        if ConfigName ~= "" then
+            Rayfield:SaveConfiguration(ConfigName)
+            Rayfield:Notify({Title = "Config", Content = "Saved: " .. ConfigName})
+        end
+    end,
 })
 ConfigTab:CreateButton({
-	Name = "Load Config",
-	Callback = function()
-		if ConfigName ~= "" then
-			Rayfield:LoadConfiguration(ConfigName)
-			Rayfield:Notify({Title = "Config", Content = "Loaded: " .. ConfigName})
-		end
-	end,
+    Name = "Load Config",
+    Callback = function()
+        if ConfigName ~= "" then
+            Rayfield:LoadConfiguration(ConfigName)
+            Rayfield:Notify({Title = "Config", Content = "Loaded: " .. ConfigName})
+        end
+    end,
 })
 
 ConfigTab:CreateSection("Keybinds")
 ConfigTab:CreateKeybind({
-	Name = "Toggle UI",
-	CurrentKeybind = "Backquote",
-	HoldToInteract = false,
-	Flag = "UIKeybind",
-	Callback = function()
-		Window:Toggle()
-	end,
+    Name = "Toggle UI",
+    CurrentKeybind = "Backquote",
+    HoldToInteract = false,
+    Flag = "UIKeybind",
+    Callback = function()
+        Window:Toggle()
+    end,
 })
 
--- [[ CONSTANT REMATCH VOTE LOOP (5-10s) ]]
+-- [[ CONSTANT REMATCH VOTE LOOP ]]
 
 task.spawn(function()
     local MatchmakingRemotes = ReplicatedStorage:WaitForChild("MatchmakingShared", 10) and ReplicatedStorage.MatchmakingShared:WaitForChild("Remotes", 10)
@@ -273,7 +292,7 @@ task.spawn(function()
             pcall(function()
                 if RematchVote then RematchVote:FireServer() end
             end)
-            task.wait(math.random(5, 10)) -- 5~10초 랜덤 간격
+            task.wait(math.random(5, 10))
         else
             task.wait(1)
         end
@@ -286,7 +305,6 @@ task.spawn(function()
     local Remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
     local MatchmakingRemotes = ReplicatedStorage:WaitForChild("MatchmakingShared", 10) and ReplicatedStorage.MatchmakingShared:WaitForChild("Remotes", 10)
     
-    -- 1. Game Start & Round Events (Original Restored)
     if Remotes then
         local RoundCleanup = Remotes:WaitForChild("RoundCleanup", 10)
         local ClientLoaded = Remotes:WaitForChild("ClientLoaded", 10)
@@ -295,7 +313,6 @@ task.spawn(function()
         if ClientLoaded then ClientLoaded.OnClientEvent:Connect(function(matchId) if matchId and type(matchId) == "string" then _G.CurrentMatchId = matchId end WinLimitReached = false TriggerSmartKill() end) end
     end
 
-    -- 2. Matchmaking & Rematch Logic
     if MatchmakingRemotes then
         local PartyStateChanged = MatchmakingRemotes:WaitForChild("PartyStateChanged", 10)
         local RematchState = MatchmakingRemotes:WaitForChild("RematchState", 10)
@@ -303,7 +320,9 @@ task.spawn(function()
         local function UpdateMatchStatus(data)
             if data and data.matched ~= nil then
                 _G.IsMatched = data.matched
-                if not _G.IsMatched and _G.AutoQueue and not WinLimitReached then StartAutoQueue() end
+                if not _G.IsMatched and _G.AutoQueue and not WinLimitReached and not _G.InCleanupWait then 
+                    StartAutoQueue() 
+                end
             end
         end
 
@@ -312,7 +331,6 @@ task.spawn(function()
         if RematchState then
             RematchState.OnClientEvent:Connect(function(data)
                 if data then
-                    -- 승리 제한 체크
                     local currentWinsA = data.winsA or 0
                     local currentWinsB = data.winsB or 0
                     
@@ -321,10 +339,9 @@ task.spawn(function()
                             WinLimitReached = true
                             Rayfield:Notify({Title = "Win Limit", Content = "Limit Reached! Switching Server..."})
                             
-                            -- 강제 퀵 매치 실행 (StartAutoQueue 로직 사용)
                             task.spawn(function()
                                 for i = 1, 3 do
-                                    StartAutoQueue()
+                                    sendQueueSignal()
                                     task.wait(2)
                                 end
                                 ServerHop()
@@ -349,8 +366,8 @@ end)
 -- Fallback Loop for Auto Queue
 task.spawn(function()
     while true do
-        if _G.AutoQueue and not _G.IsMatched and not WinLimitReached then
-            StartAutoQueue()
+        if _G.AutoQueue and not _G.IsMatched and not WinLimitReached and not _G.InCleanupWait then
+            sendQueueSignal()
         end
         task.wait(10)
     end
@@ -363,5 +380,5 @@ end)
 
 Rayfield:Notify({
     Title = "Koji HUD",
-    Content = "Burst Kill Logic (10/s) Updated!"
+    Content = "Burst Kill Logic (3/s) & Queue Delay updated!"
 })
