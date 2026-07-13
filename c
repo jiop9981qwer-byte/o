@@ -8,6 +8,7 @@ local VirtualUser = game:GetService("VirtualUser")
 local LocalPlayer = Players.LocalPlayer
 while not LocalPlayer do task.wait(0.5) LocalPlayer = Players.LocalPlayer end
 
+-- [[ GLOBAL STATES ]]
 _G.AutoKill = false
 _G.AutoQueue = false
 _G.AutoRematch = false
@@ -19,6 +20,7 @@ _G.SelectedModes = {["1v1"] = false, ["2v2"] = false, ["3v3"] = false, ["4v4"] =
 _G.IsMatched = false
 _G.InCleanupWait = false
 
+-- [[ AUTOMATIC DUEL STATES ]]
 _G.TargetDuelUserId = 0
 _G.AutoDuelChallenge = false
 _G.AutoAcceptDuel = false
@@ -27,6 +29,7 @@ local WinLimitReached = false
 local queueCoroutine = nil
 local duelChallengeCoroutine = nil
 
+-- [[ UI SETUP ]]
 local Window = Rayfield:CreateWindow({
     Name = "Koji HUD",
     LoadingTitle = "Koji HUD Loading...",
@@ -42,6 +45,7 @@ local CombatTab = Window:CreateTab("Combat", 4483362458)
 local MatchmakingTab = Window:CreateTab("Matchmaking", 4483362458)
 local ConfigTab = Window:CreateTab("Settings", 4483362458)
 
+-- [[ FUNCTIONS ]]
 local function ServerHop()
     local success = pcall(function()
         local servers = HttpService:JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"))
@@ -123,7 +127,7 @@ local function OnRoundCleanup()
     if not _G.AutoQueue then return end
     task.spawn(function()
         _G.InCleanupWait = true
-        task.wait(60)
+        task.wait(50) -- 50초 대기 로직 적용
         _G.InCleanupWait = false
     end)
 end
@@ -178,12 +182,13 @@ local function StartAutoQueue()
                 if not _G.InCleanupWait and not _G.IsMatched and not WinLimitReached then
                     sendQueueSignal()
                 end
-                task.wait(5)
+                task.wait(10) -- 10초 주기 반복 적용
             end
         end)
     end
 end
 
+-- [[ UI ELEMENTS ]]
 CombatTab:CreateSection("Kill Functions")
 CombatTab:CreateButton({ Name = "Kill All (Instant)", Callback = function() KillAll() end })
 CombatTab:CreateToggle({ Name = "Auto Kill", CurrentValue = false, Flag = "AutoKill", Callback = function(Value) _G.AutoKill = Value end })
@@ -207,28 +212,23 @@ for _, mode in ipairs({"1v1", "2v2", "3v3", "4v4"}) do
 end
 
 MatchmakingTab:CreateSection("Automatic Duel System")
-MatchmakingTab:CreateInput({ Name = "User ID", PlaceholderText = "Enter Target UserID...", RemoveTextAfterFocusLost = false, Callback = function(Text) _G.TargetDuelUserId = tonumber(Text) or 0 end })
-MatchmakingTab:CreateToggle({
-    Name = "Auto Duel",
-    CurrentValue = false,
-    Flag = "AutoDuelChallenge",
-    Callback = function(Value)
-        _G.AutoDuelChallenge = Value
-        if duelChallengeCoroutine then task.cancel(duelChallengeCoroutine) duelChallengeCoroutine = nil end
-        if Value then
-            duelChallengeCoroutine = task.spawn(function()
+MatchmakingTab:CreateInput({ Name = "User ID", PlaceholderText = "Enter Target UserID...", Callback = function(Text) _G.TargetDuelUserId = tonumber(Text) or 0 end })
+MatchmakingTab:CreateToggle({ Name = "Auto Duel", CurrentValue = false, Callback = function(Value)
+    _G.AutoDuelChallenge = Value
+    if duelChallengeCoroutine then task.cancel(duelChallengeCoroutine) duelChallengeCoroutine = nil end
+    if Value then
+        duelChallengeCoroutine = task.spawn(function()
+            while _G.AutoDuelChallenge do
                 local RequestSendRemote = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("PlayerRequestSend")
-                while _G.AutoDuelChallenge do
-                    if _G.TargetDuelUserId > 0 and RequestSendRemote and not _G.IsMatched and not _G.InCleanupWait then
-                        pcall(function() RequestSendRemote:InvokeServer({Type = "Duel", TargetUserId = _G.TargetDuelUserId}) end)
-                        local checkTime = 0
-                        while checkTime < 5 and not _G.IsMatched and _G.AutoDuelChallenge do task.wait(0.5) checkTime = checkTime + 0.5 end
-                    else task.wait(2) end
-                end
-            end)
-        end
-    end,
-})
+                if _G.TargetDuelUserId > 0 and RequestSendRemote and not _G.IsMatched and not _G.InCleanupWait then
+                    pcall(function() RequestSendRemote:InvokeServer({Type = "Duel", TargetUserId = _G.TargetDuelUserId}) end)
+                    local checkTime = 0
+                    while checkTime < 5 and not _G.IsMatched and _G.AutoDuelChallenge do task.wait(0.5) checkTime = checkTime + 0.5 end
+                else task.wait(2) end
+            end
+        end)
+    end
+end })
 
 MatchmakingTab:CreateToggle({ Name = "Auto Accept", CurrentValue = false, Flag = "AutoAcceptDuel", Callback = function(Value) _G.AutoAcceptDuel = Value end })
 
@@ -244,6 +244,7 @@ ConfigTab:CreateButton({ Name = "Load", Callback = function() if ConfigName ~= "
 ConfigTab:CreateSection("Keybinds")
 ConfigTab:CreateKeybind({ Name = "Toggle UI", CurrentKeybind = "Backquote", Callback = function() Window:Toggle() end })
 
+-- [[ CONSTANT REMATCH VOTE LOOP ]]
 task.spawn(function()
     local MatchmakingRemotes = ReplicatedStorage:WaitForChild("MatchmakingShared", 10) and ReplicatedStorage.MatchmakingShared:WaitForChild("Remotes", 10)
     local RematchVote = MatchmakingRemotes and MatchmakingRemotes:FindFirstChild("RematchVote")
@@ -255,46 +256,57 @@ task.spawn(function()
     end
 end)
 
+-- [[ MAIN AUTOMATION LOGIC ]]
 task.spawn(function()
-    local Remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
-    local MatchmakingRemotes = ReplicatedStorage:WaitForChild("MatchmakingShared", 10) and ReplicatedStorage.MatchmakingShared:FindFirstChild("Remotes")
+    local Remotes = ReplicatedStorage:WaitForChild("Remotes", 20)
+    local MatchmakingRemotes = ReplicatedStorage:WaitForChild("MatchmakingShared", 20) and ReplicatedStorage.MatchmakingShared:WaitForChild("Remotes", 20)
     
     if Remotes then
+        local RoundCleanup = Remotes:WaitForChild("RoundCleanup", 10)
+        local ClientLoaded = Remotes:WaitForChild("ClientLoaded", 10)
         local RequestNotify = Remotes:WaitForChild("PlayerRequestNotify", 10)
         local RespondRemote = Remotes:WaitForChild("PlayerRequestRespond", 10)
         
+        if RoundCleanup then RoundCleanup.OnClientEvent:Connect(function() WinLimitReached = false TriggerSmartKill() end) end
+        if ClientLoaded then ClientLoaded.OnClientEvent:Connect(function() WinLimitReached = false TriggerSmartKill() end) end
+        
         if RequestNotify and RespondRemote then
             RequestNotify.OnClientEvent:Connect(function(data)
-                if _G.AutoAcceptDuel and data then
-                    local requestId = nil
-                    if type(data) == "table" then
-                        requestId = data.Id or data.id or data.RequestId or data.UUID or data.Type
-                        if not requestId then
-                            for _, v in pairs(data) do
-                                if type(v) == "string" and string.len(v) == 36 and string.find(v, "-") then
-                                    requestId = v
-                                    break
-                                end
-                            end
+                if not _G.AutoAcceptDuel then return end
+                local requestId = nil
+                if type(data) == "string" then requestId = data
+                elseif type(data) == "table" then
+                    requestId = data.Id or data.id or data.UUID or data.RequestId
+                    if not requestId then
+                        for _, v in pairs(data) do
+                            if type(v) == "string" and #v == 36 and string.find(v, "-") then requestId = v break end
                         end
-                    elseif type(data) == "string" then
-                        requestId = data
                     end
-                    if requestId then
-                        task.wait(0.2)
-                        pcall(function() RespondRemote:FireServer(requestId, true) end)
-                    end
+                end
+                if requestId then
+                    task.wait(0.25)
+                    pcall(function() RespondRemote:FireServer(requestId, true) end)
+                end
+            end)
+        end
+    end
+
+    if MatchmakingRemotes then
+        local PartyStateChanged = MatchmakingRemotes:WaitForChild("PartyStateChanged", 10)
+        local RematchState = MatchmakingRemotes:WaitForChild("RematchState", 10)
+        if PartyStateChanged then PartyStateChanged.OnClientEvent:Connect(function(data) if data then _G.IsMatched = data.matched end end) end
+        if RematchState then
+            RematchState.OnClientEvent:Connect(function(data)
+                if data and (data.winsA >= _G.RematchLimit or data.winsB >= _G.RematchLimit) then
+                    WinLimitReached = true
+                    task.spawn(function() for i=1,3 do sendQueueSignal() task.wait(2) end ServerHop() end)
                 end
             end)
         end
     end
 end)
 
-LocalPlayer.Idled:Connect(function()
-    if _G.AntiAFK then
-        VirtualUser:CaptureController()
-        VirtualUser:ClickButton2(Vector2.new())
-    end
-end)
+LocalPlayer.Idled:Connect(function() if _G.AntiAFK then VirtualUser:CaptureController() VirtualUser:ClickButton2(Vector2.new()) end end)
+task.spawn(function() task.wait(2) pcall(function() Rayfield:LoadConfiguration() end) end)
 
-Rayfield:Notify({ Title = "Koji HUD", Content = "Loaded successfully!" })
+Rayfield:Notify({ Title = "Koji HUD", Content = "Systems Initialized" })
