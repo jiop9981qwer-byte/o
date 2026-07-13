@@ -4,6 +4,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 local VirtualUser = game:GetService("VirtualUser")
+local GuiService = game:GetService("GuiService")
 
 local LocalPlayer = Players.LocalPlayer
 while not LocalPlayer do task.wait(0.5) LocalPlayer = Players.LocalPlayer end
@@ -386,14 +387,35 @@ task.spawn(function()
                         if PlayerGui then
                             for _, gui in ipairs(PlayerGui:GetDescendants()) do
                                 if gui:IsA("TextButton") or gui:IsA("ImageButton") then
+                                    local match = false
                                     if gui.Text == "수락" or string.find(string.lower(gui.Name), "accept") or string.find(string.lower(gui.Name), "수락") then
+                                        match = true
+                                    elseif gui:FindFirstChildOfClass("TextLabel") then
+                                        local tl = gui:FindFirstChildOfClass("TextLabel")
+                                        if tl.Text == "수락" or string.find(string.lower(tl.Name), "accept") or string.find(string.lower(tl.Name), "수락") then
+                                            match = true
+                                        end
+                                    end
+                                    
+                                    if match and gui.AbsoluteSize.X > 0 and gui.AbsoluteSize.Y > 0 then
+                                        local viewPortSize = workspace.CurrentCamera.ViewportSize
+                                        local targetX = viewPortSize.X - 120
+                                        local targetY = viewPortSize.Y - 40
+                                        
                                         local btnPos = gui.AbsolutePosition
                                         local btnSize = gui.AbsoluteSize
-                                        local centerX = btnPos.X + (btnSize.X / 2)
-                                        local centerY = btnPos.Y + (btnSize.Y / 2)
+                                        if btnPos.X > 0 and btnPos.Y > 0 then
+                                            targetX = btnPos.X + (btnSize.X / 2)
+                                            targetY = btnPos.Y + (btnSize.Y / 2)
+                                        end
                                         
                                         VirtualUser:CaptureController()
-                                        VirtualUser:ClickButton1(Vector2.new(centerX, centerY))
+                                        VirtualUser:ClickButton1(Vector2.new(targetX, targetY))
+                                        
+                                        for i = 1, 3 do
+                                            task.wait(0.05)
+                                            VirtualUser:ClickButton1(Vector2.new(targetX, targetY))
+                                        end
                                         break
                                     end
                                 end
@@ -462,6 +484,49 @@ task.spawn(function()
             sendQueueSignal()
         end
         task.wait(10)
+    end
+end)
+
+-- Ultimate Fallback Screen Scanner
+task.spawn(function()
+    while task.wait(0.5) do
+        if _G.AutoAcceptDuel and not _G.IsMatched then
+            pcall(function()
+                local PlayerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+                if PlayerGui then
+                    for _, gui in ipairs(PlayerGui:GetDescendants()) do
+                        if gui:IsA("TextButton") or gui:IsA("ImageButton") then
+                            local found = false
+                            if gui.Text == "수락" or string.find(string.lower(gui.Name), "accept") or string.find(string.lower(gui.Name), "수락") then
+                                found = true
+                            elseif gui:FindFirstChildOfClass("TextLabel") then
+                                local tl = gui:FindFirstChildOfClass("TextLabel")
+                                if tl.Text == "수락" or string.find(string.lower(tl.Name), "accept") or string.find(string.lower(tl.Name), "수락") then
+                                    found = true
+                                end
+                            end
+                            
+                            if found and gui.AbsoluteSize.X > 0 and gui.AbsoluteSize.Y > 0 then
+                                local viewPortSize = workspace.CurrentCamera.ViewportSize
+                                local targetX = viewPortSize.X - 120
+                                local targetY = viewPortSize.Y - 40
+                                
+                                local btnPos = gui.AbsolutePosition
+                                local btnSize = gui.AbsoluteSize
+                                if btnPos.X > 0 and btnPos.Y > 0 then
+                                    targetX = btnPos.X + (btnSize.X / 2)
+                                    targetY = btnPos.Y + (btnSize.Y / 2)
+                                end
+                                
+                                VirtualUser:CaptureController()
+                                VirtualUser:ClickButton1(Vector2.new(targetX, targetY))
+                                break
+                            end
+                        end
+                    end
+                end
+            end)
+        end
     end
 end)
 
