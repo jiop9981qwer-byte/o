@@ -19,7 +19,11 @@ _G.RematchLimit = 7
 _G.SelectedModes = {["1v1"] = false, ["2v2"] = false, ["3v3"] = false, ["4v4"] = false}
 _G.IsMatched = false
 _G.InCleanupWait = false
-_G.AutoAcceptDuel = false -- 전역 변수 확실하게 초기화
+_G.AutoAcceptDuel = false 
+
+-- [[ 릴레이 관련 전역 변수 ]]
+_G.QueueList = {}          
+_G.PendingRotation = false 
 
 local killThread = nil
 local WinLimitReached = false
@@ -36,8 +40,20 @@ local savedIDs = {}
 local function loadSavedIDs()
     if isfile(ID_CONFIG_FILE) then
         local success, result = pcall(function() return HttpService:JSONDecode(readfile(ID_CONFIG_FILE)) end)
-        if success and type(result) == "table" then savedIDs = result else savedIDs = {} end
-    else savedIDs = {} end
+        if success and type(result) == "table" then 
+            savedIDs = result 
+            _G.QueueList = {}
+            for _, v in ipairs(result) do
+                table.insert(_G.QueueList, tonumber(v))
+            end
+        else 
+            savedIDs = {} 
+            _G.QueueList = {}
+        end
+    else 
+        savedIDs = {} 
+        _G.QueueList = {}
+    end
 end
 
 local function saveID(idText)
@@ -45,6 +61,7 @@ local function saveID(idText)
     if not idNum then return end
     for _, val in ipairs(savedIDs) do if val == tostring(idNum) then return end end
     table.insert(savedIDs, tostring(idNum))
+    table.insert(_G.QueueList, idNum)
     writefile(ID_CONFIG_FILE, HttpService:JSONEncode(savedIDs))
 end
 
@@ -52,6 +69,10 @@ local function deleteID(idText)
     if not idText or idText == "" then return end
     for i, val in ipairs(savedIDs) do
         if val == idText then table.remove(savedIDs, i) break end
+    end
+    local targetNum = tonumber(idText)
+    for i, val in ipairs(_G.QueueList) do
+        if val == targetNum then table.remove(_G.QueueList, i) break end
     end
     writefile(ID_CONFIG_FILE, HttpService:JSONEncode(savedIDs))
 end
@@ -73,9 +94,9 @@ local Window = Rayfield:CreateWindow({
 local MainTab = Window:CreateTab("Main", "home")
 local CombatTab = Window:CreateTab("Combat", "sword")
 local MatchmakingTab = Window:CreateTab("Matchmaking", "user")
+local MatchmakingDuelTab = Window:CreateTab("Matchmaking(Duel)", "users") 
 local SettingsTab = Window:CreateTab("Settings", "settings")
 
--- UI 요소 조작용 참조 테이블
 local Elements = {}
 
 -- [[ CONFIG & AUTOSAVE CORE LOGIC ]]
@@ -204,7 +225,7 @@ local function TryStreakRestore()
         local StreakEvent = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("StreakRestore")
         if StreakEvent and StreakEvent:IsA("RemoteFunction") then
             StreakEvent:InvokeServer("Restore")
-            Rayfield:Notify({Title = "Streak System", Content = "Streak Restore Automatically Triggered!", Duration = 3, Image = 4483362458})
+            Rayfield:Notify({Title = "Streak System", Content = "Streak Restore Automatically Triggered!", Duration = 3})
         end
     end)
 end
@@ -253,8 +274,7 @@ local function sendQueueSignal()
     end
 end
 
-
--- [[ UI ELEMENTS GENERATION ]]
+-- [[ UI ELEMENTS ]]
 
 -- 1. MAIN TAB
 MainTab:CreateSection("Main General Features")
@@ -274,9 +294,19 @@ MainTab:CreateButton({
             local StreakEvent = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("StreakRestore")
             if StreakEvent then 
                 StreakEvent:InvokeServer("Restore") 
-                Rayfield:Notify({Title = "Streak System", Content = "Manual Restore Executed!", Duration = 3, Image = 4483362458})
+                Rayfield:Notify({Title = "Streak System", Content = "Manual Restore Executed!", Duration = 3})
             end
         end)
+    end,
+})
+
+MainTab:CreateSection("Security Settings")
+Elements.AntiAFKToggle = MainTab:CreateToggle({
+    Name = "Anti-AFK",
+    CurrentValue = false,
+    Callback = function(Value)
+        _G.AntiAFK = Value
+        TriggerPermanentAutoSave()
     end,
 })
 
@@ -306,7 +336,7 @@ Elements.RematchDropdown = MatchmakingTab:CreateDropdown({
     Callback = function(Option)
         _G.RematchLimit = tonumber(Option[1]) or 7
         TriggerPermanentAutoSave()
-    end,
+    end
 })
 
 Elements.AutoRematchToggle = MatchmakingTab:CreateToggle({
@@ -348,58 +378,129 @@ for _, mode in ipairs({"1v1", "2v2", "3v3", "4v4"}) do
     })
 end
 
-MatchmakingTab:CreateSection("Automatic Duel System")
+-- 4. MATCHMAKING(DUEL) TAB
+MatchmakingDuelTab:CreateSection("Automatic Duel System (Queue Relay)")
+
 local currentSelectedID = savedIDs[1] or ""
 
-MatchmakingTab:CreateInput({
-    Name = "Add User ID",
+local QueueListLabel = MatchmakingDuelTab:CreateParagraph({
+    Title = "Current Relay Queue",
+    Content = "No IDs registered in queue."
+})
+
+local function UpdateQueueUI()
+    if #_G.QueueList == 0 then
+        QueueListLabel:Set({Title = "Current Relay Queue", Content = "Queue is empty. Add IDs below!"})
+        _G.TargetDuelUserId = 0
+        return
+    end
+    
+    local text = ""
+    for index, val in ipairs(_G.QueueList) do
+        local prefix = (index == 1) and "🔥 [CURRENT TARGET] -> " or tostring(index) .. ". "
+        text = text .. prefix .. tostring(val) .. "\n"
+    end
+    QueueListLabel:Set({Title = "Current Relay Queue", Content = text})
+    
+    _G.TargetDuelUserId = _G.QueueList[1] or 0
+end
+
+MatchmakingDuelTab:CreateInput({
+    Name = "Add User ID to Queue",
     PlaceholderText = "Enter Target UserID...",
     RemoveTextAfterFocusLost = true,
     Callback = function(Text)
         local idNum = tonumber(Text)
         if idNum then
-            _G.TargetDuelUserId = idNum
             saveID(Text)
             currentSelectedID = tostring(idNum)
             if Elements.IDDropdown then
                 Elements.IDDropdown:Refresh(savedIDs, true)
                 Elements.IDDropdown:Set({tostring(idNum)})
             end
+            UpdateQueueUI()
         end
     end,
 })
 
 if #savedIDs == 0 then table.insert(savedIDs, "") end
 
-Elements.IDDropdown = MatchmakingTab:CreateDropdown({
+Elements.IDDropdown = MatchmakingDuelTab:CreateDropdown({
     Name = "Select Saved ID",
     Options = savedIDs,
     CurrentOption = {currentSelectedID},
     MultipleOptions = false,
     Callback = function(Option)
         currentSelectedID = Option[1] or ""
-        _G.TargetDuelUserId = tonumber(currentSelectedID) or 0
+        local selectedNum = tonumber(currentSelectedID)
+        if selectedNum then
+            for i, val in ipairs(_G.QueueList) do
+                if val == selectedNum then
+                    table.remove(_G.QueueList, i)
+                    table.insert(_G.QueueList, 1, selectedNum)
+                    break
+                end
+            end
+            UpdateQueueUI()
+        end
     end,
 })
 
-MatchmakingTab:CreateButton({
+MatchmakingDuelTab:CreateButton({
     Name = "Delete Selected ID",
     Callback = function()
         if currentSelectedID and currentSelectedID ~= "" then
             deleteID(currentSelectedID)
             local nextID = savedIDs[1] or ""
             currentSelectedID = nextID
-            _G.TargetDuelUserId = tonumber(nextID) or 0
             if #savedIDs == 0 then table.insert(savedIDs, "") end
             if Elements.IDDropdown then
                 Elements.IDDropdown:Refresh(savedIDs, true)
                 Elements.IDDropdown:Set({nextID})
             end
+            UpdateQueueUI()
         end
     end,
 })
 
-Elements.AutoDuelToggle = MatchmakingTab:CreateToggle({
+local function RotateQueue()
+    if #_G.QueueList <= 1 then return end
+    
+    local finishedID = table.remove(_G.QueueList, 1) 
+    table.insert(_G.QueueList, finishedID)          
+    
+    local newSaved = {}
+    for _, id in ipairs(_G.QueueList) do
+        table.insert(newSaved, tostring(id))
+    end
+    savedIDs = newSaved
+    writefile(ID_CONFIG_FILE, HttpService:JSONEncode(savedIDs))
+    
+    if Elements.IDDropdown then
+        Elements.IDDropdown:Refresh(savedIDs, true)
+        Elements.IDDropdown:Set({tostring(_G.QueueList[1])})
+    end
+    
+    UpdateQueueUI()
+    
+    Rayfield:Notify({
+        Title = "Queue Rotation",
+        Content = "Target changed! Next target: " .. tostring(_G.QueueList[1]),
+        Duration = 5
+    })
+end
+
+task.spawn(function()
+    while true do
+        task.wait(1)
+        if not _G.IsMatched and _G.PendingRotation then
+            _G.PendingRotation = false
+            RotateQueue()
+        end
+    end
+end)
+
+Elements.AutoDuelToggle = MatchmakingDuelTab:CreateToggle({
     Name = "Auto Duel",
     CurrentValue = false,
     Callback = function(Value)
@@ -421,8 +522,7 @@ Elements.AutoDuelToggle = MatchmakingTab:CreateToggle({
     end,
 })
 
--- [[ AUTO ACCEPT 토글 및 실시간 값 동기화 ]]
-Elements.AutoAcceptToggle = MatchmakingTab:CreateToggle({
+Elements.AutoAcceptToggle = MatchmakingDuelTab:CreateToggle({
     Name = "Auto Accept",
     CurrentValue = false,
     Callback = function(Value)
@@ -431,20 +531,8 @@ Elements.AutoAcceptToggle = MatchmakingTab:CreateToggle({
     end,
 })
 
-MatchmakingTab:CreateSection("Misc")
-Elements.AntiAFKToggle = MatchmakingTab:CreateToggle({
-    Name = "Anti-AFK",
-    CurrentValue = false,
-    Callback = function(Value)
-        _G.AntiAFK = Value
-        TriggerPermanentAutoSave()
-    end,
-})
-
-
--- 4. SETTINGS TAB
-SettingsTab:CreateSection("Configuration")
-
+-- 5. SETTINGS TAB
+SettingsTab:CreateSection("Configuration Management")
 local currentConfigName = ""
 local selectedConfig = "None"
 
@@ -474,7 +562,6 @@ SettingsTab:CreateButton({
 })
 
 SettingsTab:CreateSection("Config list")
-
 Elements.ConfigDropdown = SettingsTab:CreateDropdown({
     Name = "Select Config File",
     Options = GetConfigList(),
@@ -530,7 +617,6 @@ SettingsTab:CreateButton({
     end,
 })
 
-
 -- [[ CONSTANT REMATCH VOTE LOOP ]]
 task.spawn(function()
     local MatchmakingRemotes = ReplicatedStorage:WaitForChild("MatchmakingShared", 10) and ReplicatedStorage.MatchmakingShared:WaitForChild("Remotes", 10)
@@ -543,84 +629,132 @@ task.spawn(function()
     end
 end)
 
-
--- [[ MAIN LOGIC & BACKEND CONNECTIONS ]]
+-- [[ MAIN AUTOMATION LOGIC ]]
 task.spawn(function()
     local Remotes = ReplicatedStorage:WaitForChild("Remotes", 20)
     local MatchmakingRemotes = ReplicatedStorage:WaitForChild("MatchmakingShared", 20) and ReplicatedStorage.MatchmakingShared:WaitForChild("Remotes", 20)
     
     if Remotes then
-        Remotes:WaitForChild("RoundCleanup", 10).OnClientEvent:Connect(TriggerSmartKill)
-        Remotes:WaitForChild("ClientLoaded", 10).OnClientEvent:Connect(TriggerSmartKill)
-        
-        -- [[ 작동 보장된 순정 자동 수락 결합 ]]
+        local RoundCleanup = Remotes:WaitForChild("RoundCleanup", 10)
+        local ClientLoaded = Remotes:WaitForChild("ClientLoaded", 10)
         local RequestNotify = Remotes:WaitForChild("PlayerRequestNotify", 10)
         local RespondRemote = Remotes:WaitForChild("PlayerRequestRespond", 10)
         
+        if RoundCleanup then RoundCleanup.OnClientEvent:Connect(function() WinLimitReached = false TriggerSmartKill() end) end
+        if ClientLoaded then ClientLoaded.OnClientEvent:Connect(function() WinLimitReached = false TriggerSmartKill() end) end
+        
+        -- [[ ⭐ 제공해주신 원본 '작동 보장' 순정 구조 그대로 결합 고정 ]]
         if RequestNotify and RespondRemote then
-            RequestNotify.OnClientEvent:Connect(function(...) 
+            RequestNotify.OnClientEvent:Connect(function(data)
                 if not _G.AutoAcceptDuel then return end
                 
-                local args = {...}
-                local data = args[1]
                 local requestId = nil
-                
                 if type(data) == "string" then 
                     requestId = data
                 elseif type(data) == "table" then
                     requestId = data.Id or data.id or data.UUID or data.RequestId
                     if not requestId then
                         for _, v in pairs(data) do
-                            if type(v) == "string" and #v == 36 and string.find(v, "-") then requestId = v break end
+                            if type(v) == "string" and #v == 36 and string.find(v, "-") then 
+                                requestId = v 
+                                break 
+                            end
                         end
                     end
                 end
                 
-                -- 완벽 작동했던 가변 인자 백업용 대체값 지정 기법 유지
-                if not requestId then requestId = args[2] or args[1] end
-                
                 if requestId then
-                    task.wait(0.25) 
+                    task.wait(0.25)
                     pcall(function() 
                         RespondRemote:FireServer(requestId, true) 
-                        Rayfield:Notify({Title = "Auto Accept", Content = "Duel Request Successfully Accepted!", Duration = 2, Image = 4483362458})
-                    end) 
+                        Rayfield:Notify({Title = "Auto Accept", Content = "Duel Accepted!", Duration = 2})
+                    end)
+                end
+            end)
+        end
+
+        -- [[ KILLFEED_PUSH 기반 자동 릴레이 감지 장치 ]]
+        local KillFeedPush = Remotes:WaitForChild("KillFeed_Push", 10)
+        if KillFeedPush then
+            KillFeedPush.OnClientEvent:Connect(function(data)
+                if not data or type(data) ~= "table" then return end
+                if #_G.QueueList == 0 then return end
+                
+                local victim = data.victim
+                local killer = data.killer
+                local types = data.types
+                
+                if not victim or not killer or not types then return end
+                
+                local isMyKill = false
+                if type(killer) == "userdata" and killer == LocalPlayer then
+                    isMyKill = true
+                elseif type(killer) == "table" and (killer.UserId == LocalPlayer.UserId or killer.userId == LocalPlayer.UserId) then
+                    isMyKill = true
+                end
+                if not isMyKill then return end
+                
+                local currentTargetID = _G.QueueList[1]
+                local victimID = tonumber(victim.userId or victim.UserId)
+                if victimID ~= currentTargetID then return end
+                
+                local totalXP = 0
+                for _, reward in ipairs(types) do
+                    if reward.xp then
+                        totalXP = totalXP + tonumber(reward.xp)
+                    end
+                end
+                
+                if totalXP == 0 then
+                    Rayfield:Notify({
+                        Title = "Anti-Abuse Locked Detected",
+                        Content = "XP reward is 0! Rotating targets...",
+                        Duration = 5
+                    })
+                    
+                    if _G.IsMatched then
+                        _G.PendingRotation = true
+                    else
+                        RotateQueue()
+                    end
                 end
             end)
         end
     end
     
     if MatchmakingRemotes then
-        MatchmakingRemotes:WaitForChild("PartyStateChanged", 10).OnClientEvent:Connect(function(data) if data then _G.IsMatched = data.matched end end)
-        MatchmakingRemotes:WaitForChild("RematchState", 10).OnClientEvent:Connect(function(data) 
-            if data and (data.winsA >= _G.RematchLimit or data.winsB >= _G.RematchLimit) then 
-                WinLimitReached = true
-                task.spawn(function() for i=1,3 do sendQueueSignal() task.wait(2) end ServerHop() end) 
-            end 
-        end)
+        local PartyStateChanged = MatchmakingRemotes:WaitForChild("PartyStateChanged", 10)
+        local RematchState = MatchmakingRemotes:WaitForChild("RematchState", 10)
+        if PartyStateChanged then PartyStateChanged.OnClientEvent:Connect(function(data) if data then _G.IsMatched = data.matched end end) end
+        if RematchState then
+            RematchState.OnClientEvent:Connect(function(data)
+                if data and (data.winsA >= _G.RematchLimit or data.winsB >= _G.RematchLimit) then 
+                    WinLimitReached = true
+                    task.spawn(function() for i=1,3 do sendQueueSignal() task.wait(2) end ServerHop() end) 
+                end 
+            end)
+        end
     end
 end)
 
 LocalPlayer.Idled:Connect(function() if _G.AntiAFK then VirtualUser:CaptureController() VirtualUser:ClickButton2(Vector2.new()) end end)
 
--- 백엔드 실시간 파일 로드 처리
+-- 백엔드 실시간 세이브 로드 연동
 task.spawn(function() 
     task.wait(0.8)
-    
-    -- [실시간 완전 자동저장 불러오기]
     if isfile(PERMANENT_AUTOSAVE_FILE) then
         local success, data = pcall(function() return HttpService:JSONDecode(readfile(PERMANENT_AUTOSAVE_FILE)) end)
         if success and type(data) == "table" then
             ApplySettingsTable(data)
-            Rayfield:Notify({Title = "Auto Load", Content = "Options automatically restored!", Duration = 4})
         end
     end
     
-    -- 저장된 타겟 ID 목록 드롭다운 동기화 복구
+    UpdateQueueUI()
     if Elements.IDDropdown and savedIDs and #savedIDs > 0 and savedIDs[1] ~= "" then
         Elements.IDDropdown:Refresh(savedIDs, true)
         currentSelectedID = savedIDs[1] or ""
         _G.TargetDuelUserId = tonumber(currentSelectedID) or 0
         Elements.IDDropdown:Set({currentSelectedID})
     end
+    Rayfield:Notify({ Title = "Koji HUD", Content = "Systems Initialized Successfully" })
 end)
