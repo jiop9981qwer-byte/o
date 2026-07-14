@@ -22,6 +22,7 @@ _G.InCleanupWait = false
 _G.AutoAcceptDuel = false -- 전역 변수 확실하게 초기화
 
 local killThread = nil
+local WinLimitReached = false
 
 -- [[ FILE STORAGE PATHS ]]
 local ID_CONFIG_FILE = "KojiHUD_SavedIDs.json"
@@ -216,6 +217,7 @@ local function OnRoundCleanup()
 end
 
 local function TriggerSmartKill()
+    WinLimitReached = false
     if not _G.AutoKill then return end
     
     if killThread then 
@@ -326,7 +328,7 @@ Elements.AutoQueueToggle = MatchmakingTab:CreateToggle({
         if _G.AutoQueue then 
             task.spawn(function() 
                 while _G.AutoQueue do 
-                    if not _G.InCleanupWait and not _G.IsMatched then sendQueueSignal() end 
+                    if not _G.InCleanupWait and not _G.IsMatched and not WinLimitReached then sendQueueSignal() end 
                     task.wait(10) 
                 end 
             end) 
@@ -529,6 +531,19 @@ SettingsTab:CreateButton({
 })
 
 
+-- [[ CONSTANT REMATCH VOTE LOOP ]]
+task.spawn(function()
+    local MatchmakingRemotes = ReplicatedStorage:WaitForChild("MatchmakingShared", 10) and ReplicatedStorage.MatchmakingShared:WaitForChild("Remotes", 10)
+    local RematchVote = MatchmakingRemotes and MatchmakingRemotes:FindFirstChild("RematchVote")
+    while true do
+        if _G.AutoRematch and not WinLimitReached then
+            pcall(function() if RematchVote then RematchVote:FireServer() end end)
+            task.wait(math.random(5, 10))
+        else task.wait(1) end
+    end
+end)
+
+
 -- [[ MAIN LOGIC & BACKEND CONNECTIONS ]]
 task.spawn(function()
     local Remotes = ReplicatedStorage:WaitForChild("Remotes", 20)
@@ -538,46 +553,51 @@ task.spawn(function()
         Remotes:WaitForChild("RoundCleanup", 10).OnClientEvent:Connect(TriggerSmartKill)
         Remotes:WaitForChild("ClientLoaded", 10).OnClientEvent:Connect(TriggerSmartKill)
         
-        -- [[ AUTO ACCEPT 처리 로직 구조 정밀 가공 ]]
-        -- 인자가 테이블 형태(data.Id) 혹은 순차 나열식 형태(arg1, arg2...) 둘 다 완벽 대응하도록 가변 인자(.../varargs) 사용 기법 적용
-        Remotes:WaitForChild("PlayerRequestNotify", 10).OnClientEvent:Connect(function(...) 
-            if _G.AutoAcceptDuel then 
+        -- [[ 작동 보장된 순정 자동 수락 결합 ]]
+        local RequestNotify = Remotes:WaitForChild("PlayerRequestNotify", 10)
+        local RespondRemote = Remotes:WaitForChild("PlayerRequestRespond", 10)
+        
+        if RequestNotify and RespondRemote then
+            RequestNotify.OnClientEvent:Connect(function(...) 
+                if not _G.AutoAcceptDuel then return end
+                
                 local args = {...}
                 local data = args[1]
                 local requestId = nil
                 
-                -- 1. 첫 번째 인자가 테이블형인 경우 추출
-                if type(data) == "table" then
+                if type(data) == "string" then 
+                    requestId = data
+                elseif type(data) == "table" then
                     requestId = data.Id or data.id or data.UUID or data.RequestId
-                -- 2. 두 번째 인자나 다른 인자로 ID가 들어오는 나열식 구조일 경우 안전하게 추출
-                else
-                    for _, arg in ipairs(args) do
-                        if type(arg) == "string" and #arg > 5 then -- 고유 UUID 형태 검출
-                            requestId = arg
-                            break
-                        elseif type(arg) == "number" then
-                            requestId = arg
+                    if not requestId then
+                        for _, v in pairs(data) do
+                            if type(v) == "string" and #v == 36 and string.find(v, "-") then requestId = v break end
                         end
                     end
-                    -- 아무것도 검출되지 않으면 두 번째 인자를 대체값으로 지정
-                    if not requestId then requestId = args[2] or args[1] end
                 end
                 
+                -- 완벽 작동했던 가변 인자 백업용 대체값 지정 기법 유지
+                if not requestId then requestId = args[2] or args[1] end
+                
                 if requestId then
-                    local R = Remotes:WaitForChild("PlayerRequestRespond", 10) 
                     task.wait(0.25) 
                     pcall(function() 
-                        R:FireServer(requestId, true) 
+                        RespondRemote:FireServer(requestId, true) 
                         Rayfield:Notify({Title = "Auto Accept", Content = "Duel Request Successfully Accepted!", Duration = 2, Image = 4483362458})
                     end) 
                 end
-            end 
-        end)
+            end)
+        end
     end
     
     if MatchmakingRemotes then
         MatchmakingRemotes:WaitForChild("PartyStateChanged", 10).OnClientEvent:Connect(function(data) if data then _G.IsMatched = data.matched end end)
-        MatchmakingRemotes:WaitForChild("RematchState", 10).OnClientEvent:Connect(function(data) if data and (data.winsA >= _G.RematchLimit or data.winsB >= _G.RematchLimit) then task.spawn(function() for i=1,3 do sendQueueSignal() task.wait(2) end ServerHop() end) end end)
+        MatchmakingRemotes:WaitForChild("RematchState", 10).OnClientEvent:Connect(function(data) 
+            if data and (data.winsA >= _G.RematchLimit or data.winsB >= _G.RematchLimit) then 
+                WinLimitReached = true
+                task.spawn(function() for i=1,3 do sendQueueSignal() task.wait(2) end ServerHop() end) 
+            end 
+        end)
     end
 end)
 
