@@ -19,7 +19,7 @@ _G.RematchLimit = 7
 _G.SelectedModes = {["1v1"] = false, ["2v2"] = false, ["3v3"] = false, ["4v4"] = false}
 _G.IsMatched = false
 _G.InCleanupWait = false
-_G.AutoAcceptDuel = false -- 변수 선언 초기화 확실히 수행
+_G.AutoAcceptDuel = false -- 전역 변수 확실하게 초기화
 
 local killThread = nil
 
@@ -98,7 +98,7 @@ local function GetCurrentSettingsTable()
         AutoQueue = _G.AutoQueue,
         SelectedModes = _G.SelectedModes,
         AutoDuel = _G.AutoDuelChallenge,
-        AutoAccept = _G.AutoAcceptDuel, -- 저장을 보장할 변수명 매칭
+        AutoAccept = _G.AutoAcceptDuel,
         AntiAFK = _G.AntiAFK
     }
 end
@@ -106,11 +106,11 @@ end
 local function ApplySettingsTable(data)
     if not data or type(data) ~= "table" then return end
     pcall(function()
-        if data.AutoKill ~= nil and Elements.AutoKillToggle then Elements.AutoKillToggle:Set(data.AutoKill) end
-        if data.AutoStreakRestore ~= nil and Elements.StreakRestoreToggle then Elements.StreakRestoreToggle:Set(data.AutoStreakRestore) end
-        if data.RematchLimit ~= nil and Elements.RematchDropdown then Elements.RematchDropdown:Set({data.RematchLimit}) end
-        if data.AutoRematch ~= nil and Elements.AutoRematchToggle then Elements.AutoRematchToggle:Set(data.AutoRematch) end
-        if data.AutoQueue ~= nil and Elements.AutoQueueToggle then Elements.AutoQueueToggle:Set(data.AutoQueue) end
+        if data.AutoKill ~= nil then _G.AutoKill = data.AutoKill if Elements.AutoKillToggle then Elements.AutoKillToggle:Set(data.AutoKill) end end
+        if data.AutoStreakRestore ~= nil then _G.AutoStreakRestore = data.AutoStreakRestore if Elements.StreakRestoreToggle then Elements.StreakRestoreToggle:Set(data.AutoStreakRestore) end end
+        if data.RematchLimit ~= nil then _G.RematchLimit = tonumber(data.RematchLimit) or 7 if Elements.RematchDropdown then Elements.RematchDropdown:Set({data.RematchLimit}) end end
+        if data.AutoRematch ~= nil then _G.AutoRematch = data.AutoRematch if Elements.AutoRematchToggle then Elements.AutoRematchToggle:Set(data.AutoRematch) end end
+        if data.AutoQueue ~= nil then _G.AutoQueue = data.AutoQueue if Elements.AutoQueueToggle then Elements.AutoQueueToggle:Set(data.AutoQueue) end end
         
         if data.SelectedModes then
             for mode, val in pairs(data.SelectedModes) do
@@ -119,9 +119,9 @@ local function ApplySettingsTable(data)
             end
         end
         
-        if data.AutoDuel ~= nil and Elements.AutoDuelToggle then Elements.AutoDuelToggle:Set(data.AutoDuel) end
-        if data.AutoAccept ~= nil and Elements.AutoAcceptToggle then Elements.AutoAcceptToggle:Set(data.AutoAccept) end
-        if data.AntiAFK ~= nil and Elements.AntiAFKToggle then Elements.AntiAFKToggle:Set(data.AntiAFK) end
+        if data.AutoDuel ~= nil then _G.AutoDuelChallenge = data.AutoDuel if Elements.AutoDuelToggle then Elements.AutoDuelToggle:Set(data.AutoDuel) end end
+        if data.AutoAccept ~= nil then _G.AutoAcceptDuel = data.AutoAccept if Elements.AutoAcceptToggle then Elements.AutoAcceptToggle:Set(data.AutoAccept) end end
+        if data.AntiAFK ~= nil then _G.AntiAFK = data.AntiAFK if Elements.AntiAFKToggle then Elements.AntiAFKToggle:Set(data.AntiAFK) end end
     end)
 end
 
@@ -419,12 +419,12 @@ Elements.AutoDuelToggle = MatchmakingTab:CreateToggle({
     end,
 })
 
--- [[ AUTO ACCEPT 토글 및 변수명 동기화 처리 ]]
+-- [[ AUTO ACCEPT 토글 및 실시간 값 동기화 ]]
 Elements.AutoAcceptToggle = MatchmakingTab:CreateToggle({
     Name = "Auto Accept",
     CurrentValue = false,
     Callback = function(Value)
-        _G.AutoAcceptDuel = Value -- 이 변수명으로 완벽히 매치
+        _G.AutoAcceptDuel = Value
         TriggerPermanentAutoSave()
     end,
 })
@@ -533,22 +533,48 @@ SettingsTab:CreateButton({
 task.spawn(function()
     local Remotes = ReplicatedStorage:WaitForChild("Remotes", 20)
     local MatchmakingRemotes = ReplicatedStorage:WaitForChild("MatchmakingShared", 20) and ReplicatedStorage.MatchmakingShared:WaitForChild("Remotes", 20)
+    
     if Remotes then
         Remotes:WaitForChild("RoundCleanup", 10).OnClientEvent:Connect(TriggerSmartKill)
         Remotes:WaitForChild("ClientLoaded", 10).OnClientEvent:Connect(TriggerSmartKill)
         
-        -- [[ AUTO ACCEPT 처리 로직 완벽 연동 ]]
-        Remotes:WaitForChild("PlayerRequestNotify", 10).OnClientEvent:Connect(function(data) 
-            if _G.AutoAcceptDuel then -- 수정된 변수명으로 완벽 매칭
-                local R = Remotes:WaitForChild("PlayerRequestRespond", 10) 
-                task.wait(0.25) 
-                pcall(function() 
-                    R:FireServer(data.Id or data.id or data.UUID or data.RequestId, true) 
-                    Rayfield:Notify({Title = "Auto Accept", Content = "Duel Request Accepted!", Duration = 2})
-                end) 
+        -- [[ AUTO ACCEPT 처리 로직 구조 정밀 가공 ]]
+        -- 인자가 테이블 형태(data.Id) 혹은 순차 나열식 형태(arg1, arg2...) 둘 다 완벽 대응하도록 가변 인자(.../varargs) 사용 기법 적용
+        Remotes:WaitForChild("PlayerRequestNotify", 10).OnClientEvent:Connect(function(...) 
+            if _G.AutoAcceptDuel then 
+                local args = {...}
+                local data = args[1]
+                local requestId = nil
+                
+                -- 1. 첫 번째 인자가 테이블형인 경우 추출
+                if type(data) == "table" then
+                    requestId = data.Id or data.id or data.UUID or data.RequestId
+                -- 2. 두 번째 인자나 다른 인자로 ID가 들어오는 나열식 구조일 경우 안전하게 추출
+                else
+                    for _, arg in ipairs(args) do
+                        if type(arg) == "string" and #arg > 5 then -- 고유 UUID 형태 검출
+                            requestId = arg
+                            break
+                        elseif type(arg) == "number" then
+                            requestId = arg
+                        end
+                    end
+                    -- 아무것도 검출되지 않으면 두 번째 인자를 대체값으로 지정
+                    if not requestId then requestId = args[2] or args[1] end
+                end
+                
+                if requestId then
+                    local R = Remotes:WaitForChild("PlayerRequestRespond", 10) 
+                    task.wait(0.25) 
+                    pcall(function() 
+                        R:FireServer(requestId, true) 
+                        Rayfield:Notify({Title = "Auto Accept", Content = "Duel Request Successfully Accepted!", Duration = 2, Image = 4483362458})
+                    end) 
+                end
             end 
         end)
     end
+    
     if MatchmakingRemotes then
         MatchmakingRemotes:WaitForChild("PartyStateChanged", 10).OnClientEvent:Connect(function(data) if data then _G.IsMatched = data.matched end end)
         MatchmakingRemotes:WaitForChild("RematchState", 10).OnClientEvent:Connect(function(data) if data and (data.winsA >= _G.RematchLimit or data.winsB >= _G.RematchLimit) then task.spawn(function() for i=1,3 do sendQueueSignal() task.wait(2) end ServerHop() end) end end)
@@ -559,7 +585,7 @@ LocalPlayer.Idled:Connect(function() if _G.AntiAFK then VirtualUser:CaptureContr
 
 -- 백엔드 실시간 파일 로드 처리
 task.spawn(function() 
-    task.wait(0.6)
+    task.wait(0.8)
     
     -- [실시간 완전 자동저장 불러오기]
     if isfile(PERMANENT_AUTOSAVE_FILE) then
