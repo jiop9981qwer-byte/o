@@ -19,6 +19,7 @@ _G.RematchLimit = 7
 _G.SelectedModes = {["1v1"] = false, ["2v2"] = false, ["3v3"] = false, ["4v4"] = false}
 _G.IsMatched = false
 _G.InCleanupWait = false
+_G.AutoAcceptDuel = false -- 변수 선언 초기화 확실히 수행
 
 local killThread = nil
 
@@ -62,7 +63,7 @@ local Window = Rayfield:CreateWindow({
     LoadingTitle = "Koji HUD Loading...",
     LoadingSubtitle = "Please wait",
     ConfigurationSaving = {
-        Enabled = false -- 커스텀 JSON 제어를 위해 Rayfield 기본 세이브 기능은 끕니다.
+        Enabled = false
     },
     KeySystem = false
 })
@@ -73,7 +74,7 @@ local CombatTab = Window:CreateTab("Combat", "sword")
 local MatchmakingTab = Window:CreateTab("Matchmaking", "user")
 local SettingsTab = Window:CreateTab("Settings", "settings")
 
--- UI 요소 조작용 참조 테이블 (실시간 값 적용 및 동기화 목적)
+-- UI 요소 조작용 참조 테이블
 local Elements = {}
 
 -- [[ CONFIG & AUTOSAVE CORE LOGIC ]]
@@ -97,7 +98,7 @@ local function GetCurrentSettingsTable()
         AutoQueue = _G.AutoQueue,
         SelectedModes = _G.SelectedModes,
         AutoDuel = _G.AutoDuelChallenge,
-        AutoAccept = _G.AutoAcceptDuel,
+        AutoAccept = _G.AutoAcceptDuel, -- 저장을 보장할 변수명 매칭
         AntiAFK = _G.AntiAFK
     }
 end
@@ -418,11 +419,12 @@ Elements.AutoDuelToggle = MatchmakingTab:CreateToggle({
     end,
 })
 
+-- [[ AUTO ACCEPT 토글 및 변수명 동기화 처리 ]]
 Elements.AutoAcceptToggle = MatchmakingTab:CreateToggle({
     Name = "Auto Accept",
     CurrentValue = false,
     Callback = function(Value)
-        _G.AutoAcceptDuel = Value
+        _G.AutoAcceptDuel = Value -- 이 변수명으로 완벽히 매치
         TriggerPermanentAutoSave()
     end,
 })
@@ -438,7 +440,7 @@ Elements.AntiAFKToggle = MatchmakingTab:CreateToggle({
 })
 
 
--- 4. SETTINGS TAB (해외 허브 스타일 완벽 디자인 정렬)
+-- 4. SETTINGS TAB
 SettingsTab:CreateSection("Configuration")
 
 local currentConfigName = ""
@@ -534,7 +536,18 @@ task.spawn(function()
     if Remotes then
         Remotes:WaitForChild("RoundCleanup", 10).OnClientEvent:Connect(TriggerSmartKill)
         Remotes:WaitForChild("ClientLoaded", 10).OnClientEvent:Connect(TriggerSmartKill)
-        Remotes:WaitForChild("PlayerRequestNotify", 10).OnClientEvent:Connect(function(data) if _G.AutoAcceptDuel then local R = Remotes:WaitForChild("PlayerRequestRespond", 10) task.wait(0.25) pcall(function() R:FireServer(data.Id or data.id or data.UUID or data.RequestId, true) end) end end)
+        
+        -- [[ AUTO ACCEPT 처리 로직 완벽 연동 ]]
+        Remotes:WaitForChild("PlayerRequestNotify", 10).OnClientEvent:Connect(function(data) 
+            if _G.AutoAcceptDuel then -- 수정된 변수명으로 완벽 매칭
+                local R = Remotes:WaitForChild("PlayerRequestRespond", 10) 
+                task.wait(0.25) 
+                pcall(function() 
+                    R:FireServer(data.Id or data.id or data.UUID or data.RequestId, true) 
+                    Rayfield:Notify({Title = "Auto Accept", Content = "Duel Request Accepted!", Duration = 2})
+                end) 
+            end 
+        end)
     end
     if MatchmakingRemotes then
         MatchmakingRemotes:WaitForChild("PartyStateChanged", 10).OnClientEvent:Connect(function(data) if data then _G.IsMatched = data.matched end end)
